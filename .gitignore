@@ -1,0 +1,28 @@
+# Build output
+target/
+out/
+build/
+
+# Local Maven repository and machine-specific settings
+.m2/
+maven-settings.xml
+
+# Runtime logs
+logs/
+*.log
+
+# IDE files
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
