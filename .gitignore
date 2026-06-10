@@ -2,10 +2,16 @@
 target/
 out/
 build/
+dist/
 
 # Local Maven repository and machine-specific settings
 .m2/
 maven-settings.xml
+
+# Frontend dependencies
+node_modules/
+frontend/node_modules/
+frontend/dist/
 
 # Runtime logs
 logs/

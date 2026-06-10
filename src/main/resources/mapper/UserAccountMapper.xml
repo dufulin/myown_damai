@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.user.mapper.UserAccountMapper">
+
+    <resultMap id="UserAccountResultMap" type="com.myown.damai.user.entity.UserAccount">
+        <id property="id" column="id"/>
+        <result property="username" column="username"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="nickname" column="nickname"/>
+        <result property="phone" column="phone"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="UserAccountColumns">
+        id, username, password_hash, nickname, phone, status, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="UserAccountResultMap">
+        SELECT <include refid="UserAccountColumns"/>
+        FROM user_accounts
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByUsername" resultMap="UserAccountResultMap">
+        SELECT <include refid="UserAccountColumns"/>
+        FROM user_accounts
+        WHERE username = #{username}
+    </select>
+
+    <insert id="insert" parameterType="com.myown.damai.user.entity.UserAccount"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_accounts
+            (username, password_hash, nickname, phone, status, created_at, updated_at)
+        VALUES
+            (#{username}, #{passwordHash}, #{nickname}, #{phone}, #{status}, #{createdAt}, #{updatedAt})
+    </insert>
+</mapper>

@@ -1,48 +1,19 @@
 package com.myown.damai.user.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
 import java.time.Instant;
 
-@Entity
-@Table(name = "user_accounts")
 public class UserAccount {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(nullable = false, unique = true, length = 50)
     private String username;
-
-    @Column(nullable = false, length = 100)
     private String passwordHash;
-
-    @Column(length = 50)
     private String nickname;
-
-    @Column(length = 30)
     private String phone;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
     private UserStatus status = UserStatus.ACTIVE;
-
-    @Column(nullable = false, updatable = false)
     private Instant createdAt;
-
-    @Column(nullable = false)
     private Instant updatedAt;
 
-    protected UserAccount() {
+    public UserAccount() {
     }
 
     public UserAccount(String username, String passwordHash, String nickname, String phone) {
@@ -52,47 +23,87 @@ public class UserAccount {
         this.phone = phone;
     }
 
-    @PrePersist
-    void prePersist() {
-        Instant now = Instant.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void preUpdate() {
-        this.updatedAt = Instant.now();
+    public UserAccount(
+            Long id,
+            String username,
+            String passwordHash,
+            String nickname,
+            String phone,
+            UserStatus status,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this.id = id;
+        this.username = username;
+        this.passwordHash = passwordHash;
+        this.nickname = nickname;
+        this.phone = phone;
+        this.status = status;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     public Long getId() {
         return id;
     }
 
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public String getUsername() {
         return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
     }
 
     public String getPasswordHash() {
         return passwordHash;
     }
 
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     public String getNickname() {
         return nickname;
+    }
+
+    public void setNickname(String nickname) {
+        this.nickname = nickname;
     }
 
     public String getPhone() {
         return phone;
     }
 
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
     public UserStatus getStatus() {
         return status;
+    }
+
+    public void setStatus(UserStatus status) {
+        this.status = status;
     }
 
     public Instant getCreatedAt() {
         return createdAt;
     }
 
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

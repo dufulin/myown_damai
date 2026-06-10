@@ -1,0 +1,34 @@
+services:
+  mysql:
+    image: mysql:5.7
+    container_name: mysql
+    privileged: true
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: myown_damai
+    volumes:
+      - /mysql/log:/var/log/mysql
+      - /mysql/data:/var/lib/mysql
+      - /mysql/conf:/etc/mysql/conf.d
+
+  redis:
+    image: redis:6.0.8
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass 123
+
+  nacos:
+    image: nacos/nacos-server:v2.2.3
+    container_name: nacos-server
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    environment:
+      MODE: standalone
+      nacos.core.auth.enabled: "true"
+      nacos.core.auth.plugin.nacos.token.secret.key: SecretKey012345678901234567890123456789012345678901234567890123456789
+      nacos.core.auth.server.identity.key: XN3zr6HfJV%LjUPjRBQzBB
+      nacos.core.auth.server.identity.value: B3CU%K3AxEAMrgPBdKLRQRL

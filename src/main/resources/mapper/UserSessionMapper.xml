@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.user.mapper.UserSessionMapper">
+
+    <resultMap id="UserSessionResultMap" type="com.myown.damai.user.entity.UserSession">
+        <id property="id" column="session_id"/>
+        <result property="tokenHash" column="token_hash"/>
+        <result property="createdAt" column="session_created_at"/>
+        <result property="expiresAt" column="expires_at"/>
+        <result property="revokedAt" column="revoked_at"/>
+        <association property="user" javaType="com.myown.damai.user.entity.UserAccount">
+            <id property="id" column="user_id"/>
+            <result property="username" column="username"/>
+            <result property="passwordHash" column="password_hash"/>
+            <result property="nickname" column="nickname"/>
+            <result property="phone" column="phone"/>
+            <result property="status" column="status"/>
+            <result property="createdAt" column="user_created_at"/>
+            <result property="updatedAt" column="user_updated_at"/>
+        </association>
+    </resultMap>
+
+    <sql id="SessionJoinColumns">
+        s.id AS session_id,
+        s.token_hash,
+        s.created_at AS session_created_at,
+        s.expires_at,
+        s.revoked_at,
+        u.id AS user_id,
+        u.username,
+        u.password_hash,
+        u.nickname,
+        u.phone,
+        u.status,
+        u.created_at AS user_created_at,
+        u.updated_at AS user_updated_at
+    </sql>
+
+    <select id="selectById" resultMap="UserSessionResultMap">
+        SELECT <include refid="SessionJoinColumns"/>
+        FROM user_sessions s
+        JOIN user_accounts u ON u.id = s.user_id
+        WHERE s.id = #{id}
+    </select>
+
+    <select id="selectByTokenHash" resultMap="UserSessionResultMap">
+        SELECT <include refid="SessionJoinColumns"/>
+        FROM user_sessions s
+        JOIN user_accounts u ON u.id = s.user_id
+        WHERE s.token_hash = #{tokenHash}
+    </select>
+
+    <insert id="insert" parameterType="com.myown.damai.user.entity.UserSession"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_sessions
+            (token_hash, user_id, created_at, expires_at, revoked_at)
+        VALUES
+            (#{tokenHash}, #{user.id}, #{createdAt}, #{expiresAt}, #{revokedAt})
+    </insert>
+
+    <update id="update" parameterType="com.myown.damai.user.entity.UserSession">
+        UPDATE user_sessions
+        SET expires_at = #{expiresAt},
+            revoked_at = #{revokedAt}
+        WHERE id = #{id}
+    </update>
+</mapper>

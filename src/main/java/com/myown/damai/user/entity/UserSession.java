@@ -1,41 +1,17 @@
 package com.myown.damai.user.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
 import java.time.Instant;
 
-@Entity
-@Table(name = "user_sessions")
 public class UserSession {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(nullable = false, unique = true, length = 88)
     private String tokenHash;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
     private UserAccount user;
-
-    @Column(nullable = false, updatable = false)
     private Instant createdAt;
-
-    @Column(nullable = false)
     private Instant expiresAt;
-
     private Instant revokedAt;
 
-    protected UserSession() {
+    public UserSession() {
     }
 
     public UserSession(String tokenHash, UserAccount user, Instant expiresAt) {
@@ -44,9 +20,20 @@ public class UserSession {
         this.expiresAt = expiresAt;
     }
 
-    @PrePersist
-    void prePersist() {
-        this.createdAt = Instant.now();
+    public UserSession(
+            Long id,
+            String tokenHash,
+            UserAccount user,
+            Instant createdAt,
+            Instant expiresAt,
+            Instant revokedAt
+    ) {
+        this.id = id;
+        this.tokenHash = tokenHash;
+        this.user = user;
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
+        this.revokedAt = revokedAt;
     }
 
     public boolean isActive(Instant now) {
@@ -61,23 +48,47 @@ public class UserSession {
         return id;
     }
 
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public String getTokenHash() {
         return tokenHash;
+    }
+
+    public void setTokenHash(String tokenHash) {
+        this.tokenHash = tokenHash;
     }
 
     public UserAccount getUser() {
         return user;
     }
 
+    public void setUser(UserAccount user) {
+        this.user = user;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
     }
 
     public Instant getExpiresAt() {
         return expiresAt;
     }
 
+    public void setExpiresAt(Instant expiresAt) {
+        this.expiresAt = expiresAt;
+    }
+
     public Instant getRevokedAt() {
         return revokedAt;
+    }
+
+    public void setRevokedAt(Instant revokedAt) {
+        this.revokedAt = revokedAt;
     }
 }
