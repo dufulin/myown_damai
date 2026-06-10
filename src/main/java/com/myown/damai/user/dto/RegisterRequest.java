@@ -1,23 +1,31 @@
 package com.myown.damai.user.dto;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+/**
+ * Carries registration data based on the d_user, d_user_mobile, and d_user_email tables.
+ */
 public record RegisterRequest(
-        @NotBlank
-        @Size(min = 3, max = 50)
-        @Pattern(regexp = "^[A-Za-z0-9_]+$")
+        @Size(max = 256)
+        String name,
+
+        @Size(max = 256)
         String username,
 
         @NotBlank
         @Size(min = 6, max = 64)
         String password,
 
-        @Size(max = 50)
-        String nickname,
+        @Size(max = 191)
+        String mobile,
 
-        @Size(max = 30)
-        String phone
+        @Size(max = 191)
+        String phone,
+
+        @Email
+        @Size(max = 191)
+        String email
 ) {
 }

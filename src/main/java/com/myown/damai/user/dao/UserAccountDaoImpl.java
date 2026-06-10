@@ -2,20 +2,25 @@ package com.myown.damai.user.dao;
 
 import com.myown.damai.user.entity.UserAccount;
 import com.myown.damai.user.mapper.UserAccountMapper;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.util.StringUtils;
 
+/**
+ * Stores user accounts and login indexes with Redis-assisted cache penetration protection.
+ */
 @Repository
 public class UserAccountDaoImpl implements UserAccountDao {
 
     private static final String NULL_VALUE = "__NULL__";
-    private static final String USERNAME_KEY_PREFIX = "damai:user:username:";
+    private static final String MOBILE_KEY_PREFIX = "damai:user:mobile:";
+    private static final String EMAIL_KEY_PREFIX = "damai:user:email:";
 
     private final UserAccountMapper userAccountMapper;
     private final StringRedisTemplate redisTemplate;
@@ -38,29 +43,23 @@ public class UserAccountDaoImpl implements UserAccountDao {
     }
 
     @Override
-    public boolean existsByUsername(String username) {
-        return findByUsername(username).isPresent();
+    public boolean existsByMobile(String mobile) {
+        return findByMobile(mobile).isPresent();
     }
 
     @Override
-    public Optional<UserAccount> findByUsername(String username) {
-        String key = usernameKey(username);
-        Optional<String> cachedUserId = getCache(key);
-        if (cachedUserId.isPresent()) {
-            String value = cachedUserId.get();
-            if (NULL_VALUE.equals(value)) {
-                return Optional.empty();
-            }
-            return findCachedUserById(value, key);
-        }
+    public boolean existsByEmail(String email) {
+        return findByEmail(email).isPresent();
+    }
 
-        Optional<UserAccount> user = Optional.ofNullable(userAccountMapper.selectByUsername(username));
-        if (user.isPresent()) {
-            putCache(key, String.valueOf(user.get().getId()), userTtl);
-        } else {
-            putCache(key, NULL_VALUE, nullTtl);
-        }
-        return user;
+    @Override
+    public Optional<UserAccount> findByMobile(String mobile) {
+        return findByLoginIndex(mobileKey(mobile), () -> Optional.ofNullable(userAccountMapper.selectByMobile(mobile)));
+    }
+
+    @Override
+    public Optional<UserAccount> findByEmail(String email) {
+        return findByLoginIndex(emailKey(email), () -> Optional.ofNullable(userAccountMapper.selectByEmail(email)));
     }
 
     @Override
@@ -70,7 +69,35 @@ public class UserAccountDaoImpl implements UserAccountDao {
         user.setUpdatedAt(now);
         userAccountMapper.insert(user);
         Objects.requireNonNull(user.getId(), "generated user id must not be null");
-        putCache(usernameKey(user.getUsername()), String.valueOf(user.getId()), userTtl);
+
+        userAccountMapper.insertMobileIndex(user.getId(), user.getMobile(), now);
+        putCache(mobileKey(user.getMobile()), String.valueOf(user.getId()), userTtl);
+        if (StringUtils.hasText(user.getEmail())) {
+            userAccountMapper.insertEmailIndex(user.getId(), user.getEmail(), now);
+            putCache(emailKey(user.getEmail()), String.valueOf(user.getId()), userTtl);
+        }
+        return user;
+    }
+
+    /**
+     * Reads through Redis first and writes null markers for missing login identifiers.
+     */
+    private Optional<UserAccount> findByLoginIndex(String cacheKey, UserLookup lookup) {
+        Optional<String> cachedUserId = getCache(cacheKey);
+        if (cachedUserId.isPresent()) {
+            String value = cachedUserId.get();
+            if (NULL_VALUE.equals(value)) {
+                return Optional.empty();
+            }
+            return findCachedUserById(value, cacheKey);
+        }
+
+        Optional<UserAccount> user = lookup.find();
+        if (user.isPresent()) {
+            putCache(cacheKey, String.valueOf(user.get().getId()), userTtl);
+        } else {
+            putCache(cacheKey, NULL_VALUE, nullTtl);
+        }
         return user;
     }
 
@@ -88,8 +115,12 @@ public class UserAccountDaoImpl implements UserAccountDao {
         }
     }
 
-    private String usernameKey(String username) {
-        return USERNAME_KEY_PREFIX + username;
+    private String mobileKey(String mobile) {
+        return MOBILE_KEY_PREFIX + mobile;
+    }
+
+    private String emailKey(String email) {
+        return EMAIL_KEY_PREFIX + email;
     }
 
     private Optional<String> getCache(String key) {
@@ -128,5 +159,17 @@ public class UserAccountDaoImpl implements UserAccountDao {
     private Duration withJitter(Duration ttl) {
         long jitterSeconds = ThreadLocalRandom.current().nextLong(0, 60);
         return ttl.plusSeconds(jitterSeconds);
+    }
+
+    /**
+     * Defers the database lookup so mobile and email paths can share cache logic.
+     */
+    @FunctionalInterface
+    private interface UserLookup {
+
+        /**
+         * Loads a user from the database.
+         */
+        Optional<UserAccount> find();
     }
 }

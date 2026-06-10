@@ -54,51 +54,62 @@ public class UserService {
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        String username = normalizeUsername(request.username());
-        LOGGER.debug("start registering user, username={}", username);
-        if (userAccountDao.existsByUsername(username)) {
-            LOGGER.warn("register rejected because username already exists, username={}", username);
-            throw new BusinessException("USERNAME_EXISTS", "username already exists", HttpStatus.CONFLICT);
+        String name = resolveDisplayName(request);
+        String mobile = normalizeMobile(resolveMobile(request));
+        String email = normalizeOptionalEmail(request.email());
+        LOGGER.debug("start registering user, mobile={}, hasEmail={}", mobile, StringUtils.hasText(email));
+        if (!StringUtils.hasText(mobile)) {
+            LOGGER.warn("register rejected because mobile is missing");
+            throw new BusinessException("MOBILE_REQUIRED", "mobile is required", HttpStatus.BAD_REQUEST);
+        }
+        if (userAccountDao.existsByMobile(mobile)) {
+            LOGGER.warn("register rejected because mobile already exists, mobile={}", mobile);
+            throw new BusinessException("MOBILE_EXISTS", "mobile already exists", HttpStatus.CONFLICT);
+        }
+        if (StringUtils.hasText(email) && userAccountDao.existsByEmail(email)) {
+            LOGGER.warn("register rejected because email already exists, email={}", email);
+            throw new BusinessException("EMAIL_EXISTS", "email already exists", HttpStatus.CONFLICT);
         }
 
         UserAccount user = new UserAccount(
-                username,
+                name,
                 passwordEncoder.encode(request.password()),
-                trimToNull(request.nickname()),
-                trimToNull(request.phone())
+                mobile,
+                email
         );
         UserAccount savedUser = saveUser(user);
-        LOGGER.info("user registered successfully, username={}, userId={}", savedUser.getUsername(), savedUser.getId());
+        LOGGER.info("user registered successfully, mobile={}, userId={}", savedUser.getMobile(), savedUser.getId());
         return createSession(savedUser);
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        String username = normalizeUsername(request.username());
-        LOGGER.debug("start logging in user, username={}", username);
-        Optional<UserAccount> foundUser = userAccountDao.findByUsername(username);
+        String loginIdentifier = normalizeLoginIdentifier(resolveLoginIdentifier(request));
+        LOGGER.debug("start logging in user, loginType={}", isEmail(loginIdentifier) ? "email" : "mobile");
+        Optional<UserAccount> foundUser = isEmail(loginIdentifier)
+                ? userAccountDao.findByEmail(loginIdentifier)
+                : userAccountDao.findByMobile(loginIdentifier);
         if (foundUser.isEmpty()) {
-            LOGGER.warn("login rejected because username was not found, username={}", username);
-            throw new BusinessException("INVALID_CREDENTIALS", "username or password is incorrect", HttpStatus.UNAUTHORIZED);
+            LOGGER.warn("login rejected because login identifier was not found, loginType={}", isEmail(loginIdentifier) ? "email" : "mobile");
+            throw new BusinessException("INVALID_CREDENTIALS", "mobile/email or password is incorrect", HttpStatus.UNAUTHORIZED);
         }
 
         UserAccount user = foundUser.get();
         if (user.getStatus() != UserStatus.ACTIVE) {
             LOGGER.warn(
-                    "login rejected because user is not active, username={}, userId={}, status={}",
-                    username,
+                    "login rejected because user is not active, userId={}, status={}",
                     user.getId(),
                     user.getStatus()
             );
-            throw new BusinessException("INVALID_CREDENTIALS", "username or password is incorrect", HttpStatus.UNAUTHORIZED);
+            throw new BusinessException("INVALID_CREDENTIALS", "mobile/email or password is incorrect", HttpStatus.UNAUTHORIZED);
         }
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            LOGGER.warn("login rejected because password did not match, username={}, userId={}", username, user.getId());
-            throw new BusinessException("INVALID_CREDENTIALS", "username or password is incorrect", HttpStatus.UNAUTHORIZED);
+            LOGGER.warn("login rejected because password did not match, userId={}", user.getId());
+            throw new BusinessException("INVALID_CREDENTIALS", "mobile/email or password is incorrect", HttpStatus.UNAUTHORIZED);
         }
 
-        LOGGER.info("user logged in successfully, username={}, userId={}", user.getUsername(), user.getId());
+        LOGGER.info("user logged in successfully, userId={}, loginType={}", user.getId(), isEmail(loginIdentifier) ? "email" : "mobile");
         return createSession(user);
     }
 
@@ -156,8 +167,8 @@ public class UserService {
         try {
             return userAccountDao.save(user);
         } catch (DataIntegrityViolationException exception) {
-            LOGGER.warn("saving user failed because username already exists, username={}", user.getUsername(), exception);
-            throw new BusinessException("USERNAME_EXISTS", "username already exists", HttpStatus.CONFLICT);
+            LOGGER.warn("saving user failed because mobile or email already exists, mobile={}", user.getMobile(), exception);
+            throw new BusinessException("LOGIN_IDENTIFIER_EXISTS", "mobile or email already exists", HttpStatus.CONFLICT);
         }
     }
 
@@ -174,14 +185,68 @@ public class UserService {
         return token;
     }
 
-    private String normalizeUsername(String username) {
-        return username.trim().toLowerCase();
+    /**
+     * Resolves a display name while keeping username as a compatibility alias.
+     */
+    private String resolveDisplayName(RegisterRequest request) {
+        if (StringUtils.hasText(request.name())) {
+            return request.name().trim();
+        }
+        if (StringUtils.hasText(request.username())) {
+            return request.username().trim();
+        }
+        return null;
     }
 
-    private String trimToNull(String value) {
-        if (!StringUtils.hasText(value)) {
-            return null;
+    /**
+     * Resolves a mobile number while keeping phone as a compatibility alias.
+     */
+    private String resolveMobile(RegisterRequest request) {
+        if (StringUtils.hasText(request.mobile())) {
+            return request.mobile();
         }
-        return value.trim();
+        return request.phone();
+    }
+
+    /**
+     * Resolves the login identifier from new and legacy request fields.
+     */
+    private String resolveLoginIdentifier(LoginRequest request) {
+        if (StringUtils.hasText(request.login())) {
+            return request.login();
+        }
+        return request.username();
+    }
+
+    /**
+     * Normalizes a mobile number for storage and lookup.
+     */
+    private String normalizeMobile(String mobile) {
+        return StringUtils.hasText(mobile) ? mobile.trim() : null;
+    }
+
+    /**
+     * Normalizes the optional email address for storage and lookup.
+     */
+    private String normalizeOptionalEmail(String email) {
+        return StringUtils.hasText(email) ? email.trim().toLowerCase() : null;
+    }
+
+    /**
+     * Normalizes the required login identifier.
+     */
+    private String normalizeLoginIdentifier(String loginIdentifier) {
+        if (!StringUtils.hasText(loginIdentifier)) {
+            throw new BusinessException("LOGIN_REQUIRED", "mobile or email is required", HttpStatus.BAD_REQUEST);
+        }
+        String normalized = loginIdentifier.trim();
+        return isEmail(normalized) ? normalized.toLowerCase() : normalized;
+    }
+
+    /**
+     * Checks whether a login identifier should use the email index.
+     */
+    private boolean isEmail(String loginIdentifier) {
+        return loginIdentifier.contains("@");
     }
 }

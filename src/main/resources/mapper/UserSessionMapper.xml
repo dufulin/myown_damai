@@ -11,13 +11,19 @@
         <result property="revokedAt" column="revoked_at"/>
         <association property="user" javaType="com.myown.damai.user.entity.UserAccount">
             <id property="id" column="user_id"/>
-            <result property="username" column="username"/>
-            <result property="passwordHash" column="password_hash"/>
-            <result property="nickname" column="nickname"/>
-            <result property="phone" column="phone"/>
-            <result property="status" column="status"/>
-            <result property="createdAt" column="user_created_at"/>
-            <result property="updatedAt" column="user_updated_at"/>
+            <result property="name" column="name"/>
+            <result property="relName" column="rel_name"/>
+            <result property="mobile" column="mobile"/>
+            <result property="gender" column="gender"/>
+            <result property="passwordHash" column="password"/>
+            <result property="emailStatus" column="email_status"/>
+            <result property="email" column="email"/>
+            <result property="relAuthenticationStatus" column="rel_authentication_status"/>
+            <result property="idNumber" column="id_number"/>
+            <result property="address" column="address"/>
+            <result property="status" column="status_name"/>
+            <result property="createdAt" column="user_create_time"/>
+            <result property="updatedAt" column="user_edit_time"/>
         </association>
     </resultMap>
 
@@ -28,39 +34,45 @@
         s.expires_at,
         s.revoked_at,
         u.id AS user_id,
-        u.username,
-        u.password_hash,
-        u.nickname,
-        u.phone,
-        u.status,
-        u.created_at AS user_created_at,
-        u.updated_at AS user_updated_at
+        u.name,
+        u.rel_name,
+        u.mobile,
+        u.gender,
+        u.password,
+        u.email_status,
+        u.email,
+        u.rel_authentication_status,
+        u.id_number,
+        u.address,
+        CASE u.status WHEN 1 THEN 'ACTIVE' ELSE 'DISABLED' END AS status_name,
+        u.create_time AS user_create_time,
+        u.edit_time AS user_edit_time
     </sql>
 
     <select id="selectById" resultMap="UserSessionResultMap">
         SELECT <include refid="SessionJoinColumns"/>
-        FROM user_sessions s
-        JOIN user_accounts u ON u.id = s.user_id
+        FROM d_user_sessions s
+        JOIN d_user u ON u.id = s.user_id
         WHERE s.id = #{id}
     </select>
 
     <select id="selectByTokenHash" resultMap="UserSessionResultMap">
         SELECT <include refid="SessionJoinColumns"/>
-        FROM user_sessions s
-        JOIN user_accounts u ON u.id = s.user_id
+        FROM d_user_sessions s
+        JOIN d_user u ON u.id = s.user_id
         WHERE s.token_hash = #{tokenHash}
     </select>
 
     <insert id="insert" parameterType="com.myown.damai.user.entity.UserSession"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO user_sessions
+        INSERT INTO d_user_sessions
             (token_hash, user_id, created_at, expires_at, revoked_at)
         VALUES
             (#{tokenHash}, #{user.id}, #{createdAt}, #{expiresAt}, #{revokedAt})
     </insert>
 
     <update id="update" parameterType="com.myown.damai.user.entity.UserSession">
-        UPDATE user_sessions
+        UPDATE d_user_sessions
         SET expires_at = #{expiresAt},
             revoked_at = #{revokedAt}
         WHERE id = #{id}

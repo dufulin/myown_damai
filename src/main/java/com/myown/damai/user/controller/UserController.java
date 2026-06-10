@@ -36,11 +36,12 @@ public class UserController {
 
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<AuthResponse>> register(@Valid @RequestBody RegisterRequest request) {
-        LOGGER.info("user register request received, username={}", request.username());
+        String mobile = request.mobile() != null ? request.mobile() : request.phone();
+        LOGGER.info("user register request received, mobile={}", mobile);
         AuthResponse authResponse = userService.register(request);
         LOGGER.info(
-                "user register request succeeded, username={}, userId={}",
-                authResponse.user().username(),
+                "user register request succeeded, mobile={}, userId={}",
+                authResponse.user().mobile(),
                 authResponse.user().id()
         );
         return ResponseEntity
@@ -50,12 +51,13 @@ public class UserController {
 
     @PostMapping("/login")
     public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        LOGGER.info("user login request received, username={}", request.username());
+        String loginIdentifier = request.login() != null ? request.login() : request.username();
+        LOGGER.info("user login request received, loginType={}", loginIdentifier != null && loginIdentifier.contains("@") ? "email" : "mobile");
         AuthResponse authResponse = userService.login(request);
         LOGGER.info(
-                "user login request succeeded, username={}, userId={}",
-                authResponse.user().username(),
-                authResponse.user().id()
+                "user login request succeeded, userId={}, mobile={}",
+                authResponse.user().id(),
+                authResponse.user().mobile()
         );
         return ApiResponse.success(authResponse);
     }

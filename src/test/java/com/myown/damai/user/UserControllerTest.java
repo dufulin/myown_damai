@@ -33,22 +33,22 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "Alice_001",
-                                  "password": "secret123",
-                                  "nickname": "Alice",
-                                  "phone": "18800000000"
+                                  "name": "Alice",
+                                  "mobile": "18800000000",
+                                  "email": "alice@example.com",
+                                  "password": "secret123"
                                 }
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.token", notNullValue()))
-                .andExpect(jsonPath("$.data.user.username").value("alice_001"));
+                .andExpect(jsonPath("$.data.user.mobile").value("18800000000"));
 
         MvcResult loginResult = mockMvc.perform(post("/api/users/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "alice_001",
+                                  "login": "alice@example.com",
                                   "password": "secret123"
                                 }
                                 """))
@@ -62,7 +62,7 @@ class UserControllerTest {
         mockMvc.perform(get("/api/users/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.username").value("alice_001"));
+                .andExpect(jsonPath("$.data.mobile").value("18800000000"));
 
         mockMvc.perform(post("/api/users/logout")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -76,10 +76,11 @@ class UserControllerTest {
     }
 
     @Test
-    void duplicateUsernameReturnsConflict() throws Exception {
+    void duplicateMobileReturnsConflict() throws Exception {
         String body = """
                 {
-                  "username": "bob",
+                  "name": "Bob",
+                  "mobile": "18800000001",
                   "password": "secret123"
                 }
                 """;
@@ -93,7 +94,7 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("USERNAME_EXISTS"));
+                .andExpect(jsonPath("$.code").value("MOBILE_EXISTS"));
     }
 
     @Test
@@ -102,7 +103,8 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "charlie",
+                                  "name": "Charlie",
+                                  "mobile": "18800000002",
                                   "password": "secret123"
                                 }
                                 """))
@@ -112,7 +114,7 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "charlie",
+                                  "login": "18800000002",
                                   "password": "wrong-password"
                                 }
                                 """))

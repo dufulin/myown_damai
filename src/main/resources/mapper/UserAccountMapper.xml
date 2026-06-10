@@ -5,36 +5,83 @@
 
     <resultMap id="UserAccountResultMap" type="com.myown.damai.user.entity.UserAccount">
         <id property="id" column="id"/>
-        <result property="username" column="username"/>
-        <result property="passwordHash" column="password_hash"/>
-        <result property="nickname" column="nickname"/>
-        <result property="phone" column="phone"/>
-        <result property="status" column="status"/>
-        <result property="createdAt" column="created_at"/>
-        <result property="updatedAt" column="updated_at"/>
+        <result property="name" column="name"/>
+        <result property="relName" column="rel_name"/>
+        <result property="mobile" column="mobile"/>
+        <result property="gender" column="gender"/>
+        <result property="passwordHash" column="password"/>
+        <result property="emailStatus" column="email_status"/>
+        <result property="email" column="email"/>
+        <result property="relAuthenticationStatus" column="rel_authentication_status"/>
+        <result property="idNumber" column="id_number"/>
+        <result property="address" column="address"/>
+        <result property="status" column="status_name"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
     </resultMap>
 
     <sql id="UserAccountColumns">
-        id, username, password_hash, nickname, phone, status, created_at, updated_at
+        u.id,
+        u.name,
+        u.rel_name,
+        u.mobile,
+        u.gender,
+        u.password,
+        u.email_status,
+        u.email,
+        u.rel_authentication_status,
+        u.id_number,
+        u.address,
+        CASE u.status WHEN 1 THEN 'ACTIVE' ELSE 'DISABLED' END AS status_name,
+        u.create_time,
+        u.edit_time
     </sql>
 
     <select id="selectById" resultMap="UserAccountResultMap">
         SELECT <include refid="UserAccountColumns"/>
-        FROM user_accounts
-        WHERE id = #{id}
+        FROM d_user u
+        WHERE u.id = #{id}
     </select>
 
-    <select id="selectByUsername" resultMap="UserAccountResultMap">
+    <select id="selectByMobile" resultMap="UserAccountResultMap">
         SELECT <include refid="UserAccountColumns"/>
-        FROM user_accounts
-        WHERE username = #{username}
+        FROM d_user_mobile m
+        JOIN d_user u ON u.id = m.user_id
+        WHERE m.mobile = #{mobile}
+          AND m.status = 1
+          AND u.status = 1
+    </select>
+
+    <select id="selectByEmail" resultMap="UserAccountResultMap">
+        SELECT <include refid="UserAccountColumns"/>
+        FROM d_user_email e
+        JOIN d_user u ON u.id = e.user_id
+        WHERE e.email = #{email}
+          AND e.status = 1
+          AND u.status = 1
     </select>
 
     <insert id="insert" parameterType="com.myown.damai.user.entity.UserAccount"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO user_accounts
-            (username, password_hash, nickname, phone, status, created_at, updated_at)
+        INSERT INTO d_user
+            (name, rel_name, mobile, gender, password, email_status, email,
+             rel_authentication_status, id_number, address, create_time, edit_time, status)
         VALUES
-            (#{username}, #{passwordHash}, #{nickname}, #{phone}, #{status}, #{createdAt}, #{updatedAt})
+            (#{name}, #{relName}, #{mobile}, #{gender}, #{passwordHash}, #{emailStatus}, #{email},
+             #{relAuthenticationStatus}, #{idNumber}, #{address}, #{createdAt}, #{updatedAt}, #{statusCode})
+    </insert>
+
+    <insert id="insertMobileIndex">
+        INSERT INTO d_user_mobile
+            (user_id, mobile, create_time, edit_time, status)
+        VALUES
+            (#{userId}, #{mobile}, #{now}, #{now}, 1)
+    </insert>
+
+    <insert id="insertEmailIndex">
+        INSERT INTO d_user_email
+            (user_id, email, create_time, edit_time, status)
+        VALUES
+            (#{userId}, #{email}, #{now}, #{now}, 1)
     </insert>
 </mapper>

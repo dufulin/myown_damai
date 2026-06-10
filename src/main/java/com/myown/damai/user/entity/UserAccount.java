@@ -2,13 +2,22 @@ package com.myown.damai.user.entity;
 
 import java.time.Instant;
 
+/**
+ * Represents the core user record stored in the d_user table.
+ */
 public class UserAccount {
 
     private Long id;
-    private String username;
+    private String name;
+    private String relName;
+    private String mobile;
+    private Integer gender = 1;
     private String passwordHash;
-    private String nickname;
-    private String phone;
+    private Integer emailStatus = 0;
+    private String email;
+    private Integer relAuthenticationStatus = 0;
+    private String idNumber;
+    private String address;
     private UserStatus status = UserStatus.ACTIVE;
     private Instant createdAt;
     private Instant updatedAt;
@@ -16,28 +25,40 @@ public class UserAccount {
     public UserAccount() {
     }
 
-    public UserAccount(String username, String passwordHash, String nickname, String phone) {
-        this.username = username;
+    public UserAccount(String name, String passwordHash, String mobile, String email) {
+        this.name = name;
         this.passwordHash = passwordHash;
-        this.nickname = nickname;
-        this.phone = phone;
+        this.mobile = mobile;
+        this.email = email;
     }
 
     public UserAccount(
             Long id,
-            String username,
+            String name,
+            String relName,
+            String mobile,
+            Integer gender,
             String passwordHash,
-            String nickname,
-            String phone,
+            Integer emailStatus,
+            String email,
+            Integer relAuthenticationStatus,
+            String idNumber,
+            String address,
             UserStatus status,
             Instant createdAt,
             Instant updatedAt
     ) {
         this.id = id;
-        this.username = username;
+        this.name = name;
+        this.relName = relName;
+        this.mobile = mobile;
+        this.gender = gender;
         this.passwordHash = passwordHash;
-        this.nickname = nickname;
-        this.phone = phone;
+        this.emailStatus = emailStatus;
+        this.email = email;
+        this.relAuthenticationStatus = relAuthenticationStatus;
+        this.idNumber = idNumber;
+        this.address = address;
         this.status = status;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -51,12 +72,36 @@ public class UserAccount {
         this.id = id;
     }
 
-    public String getUsername() {
-        return username;
+    public String getName() {
+        return name;
     }
 
-    public void setUsername(String username) {
-        this.username = username;
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getRelName() {
+        return relName;
+    }
+
+    public void setRelName(String relName) {
+        this.relName = relName;
+    }
+
+    public String getMobile() {
+        return mobile;
+    }
+
+    public void setMobile(String mobile) {
+        this.mobile = mobile;
+    }
+
+    public Integer getGender() {
+        return gender;
+    }
+
+    public void setGender(Integer gender) {
+        this.gender = gender;
     }
 
     public String getPasswordHash() {
@@ -67,20 +112,44 @@ public class UserAccount {
         this.passwordHash = passwordHash;
     }
 
-    public String getNickname() {
-        return nickname;
+    public Integer getEmailStatus() {
+        return emailStatus;
     }
 
-    public void setNickname(String nickname) {
-        this.nickname = nickname;
+    public void setEmailStatus(Integer emailStatus) {
+        this.emailStatus = emailStatus;
     }
 
-    public String getPhone() {
-        return phone;
+    public String getEmail() {
+        return email;
     }
 
-    public void setPhone(String phone) {
-        this.phone = phone;
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public Integer getRelAuthenticationStatus() {
+        return relAuthenticationStatus;
+    }
+
+    public void setRelAuthenticationStatus(Integer relAuthenticationStatus) {
+        this.relAuthenticationStatus = relAuthenticationStatus;
+    }
+
+    public String getIdNumber() {
+        return idNumber;
+    }
+
+    public void setIdNumber(String idNumber) {
+        this.idNumber = idNumber;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
     }
 
     public UserStatus getStatus() {
@@ -105,5 +174,33 @@ public class UserAccount {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    /**
+     * Returns the numeric status code used by the d_user table.
+     */
+    public int getStatusCode() {
+        return status == UserStatus.ACTIVE ? 1 : 0;
+    }
+
+    /**
+     * Keeps the old username response field compatible with existing frontend code.
+     */
+    public String getUsername() {
+        return name;
+    }
+
+    /**
+     * Keeps the old nickname response field compatible with existing frontend code.
+     */
+    public String getNickname() {
+        return name;
+    }
+
+    /**
+     * Keeps the old phone response field compatible with existing frontend code.
+     */
+    public String getPhone() {
+        return mobile;
     }
 }

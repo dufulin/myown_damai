@@ -10,10 +10,11 @@ const loading = ref(false)
 const notice = reactive({ type: 'info', text: `Backend API: ${apiBase}` })
 
 const form = reactive({
-  username: '',
+  login: '',
   password: '',
-  nickname: '',
-  phone: ''
+  name: '',
+  mobile: '',
+  email: ''
 })
 
 const isLoggedIn = computed(() => Boolean(token.value && currentUser.value))
@@ -57,8 +58,8 @@ async function submit() {
   try {
     const path = mode.value === 'login' ? '/api/users/login' : '/api/users/register'
     const body = mode.value === 'login'
-      ? { username: form.username, password: form.password }
-      : { username: form.username, password: form.password, nickname: form.nickname, phone: form.phone }
+      ? { login: form.login, password: form.password }
+      : { name: form.name, password: form.password, mobile: form.mobile, email: form.email }
 
     const result = await request(path, {
       method: 'POST',
@@ -110,7 +111,7 @@ async function logout() {
 
 function switchMode(nextMode) {
   mode.value = nextMode
-  setNotice('info', nextMode === 'login' ? 'Enter account credentials.' : 'Create a new account.')
+  setNotice('info', nextMode === 'login' ? 'Enter mobile/email credentials.' : 'Create a new account.')
 }
 
 onMounted(loadCurrentUser)
@@ -140,26 +141,32 @@ onMounted(loadCurrentUser)
         </div>
 
         <h2>{{ title }}</h2>
-        <label>
-          <span>Username</span>
-          <input v-model.trim="form.username" autocomplete="username" required minlength="3" maxlength="50" />
-        </label>
+        <template v-if="mode === 'login'">
+          <label>
+            <span>Mobile or Email</span>
+            <input v-model.trim="form.login" autocomplete="username" required maxlength="191" />
+          </label>
+        </template>
+
+        <template v-else>
+          <label>
+            <span>Name</span>
+            <input v-model.trim="form.name" maxlength="256" />
+          </label>
+          <label>
+            <span>Mobile</span>
+            <input v-model.trim="form.mobile" autocomplete="tel" required maxlength="191" />
+          </label>
+          <label>
+            <span>Email</span>
+            <input v-model.trim="form.email" type="email" autocomplete="email" maxlength="191" />
+          </label>
+        </template>
 
         <label>
           <span>Password</span>
           <input v-model="form.password" type="password" autocomplete="current-password" required minlength="6" maxlength="64" />
         </label>
-
-        <template v-if="mode === 'register'">
-          <label>
-            <span>Nickname</span>
-            <input v-model.trim="form.nickname" maxlength="50" />
-          </label>
-          <label>
-            <span>Phone</span>
-            <input v-model.trim="form.phone" maxlength="30" />
-          </label>
-        </template>
 
         <button class="primary-button" type="submit" :disabled="loading">
           {{ loading ? 'Processing...' : title }}
@@ -173,19 +180,19 @@ onMounted(loadCurrentUser)
         </div>
 
         <div v-if="isLoggedIn" class="profile">
-          <strong>{{ currentUser.nickname || currentUser.username }}</strong>
+          <strong>{{ currentUser.name || currentUser.username || currentUser.mobile }}</strong>
           <dl>
             <div>
               <dt>ID</dt>
               <dd>{{ currentUser.id }}</dd>
             </div>
             <div>
-              <dt>Username</dt>
-              <dd>{{ currentUser.username }}</dd>
+              <dt>Mobile</dt>
+              <dd>{{ currentUser.mobile || currentUser.phone || 'Not set' }}</dd>
             </div>
             <div>
-              <dt>Phone</dt>
-              <dd>{{ currentUser.phone || 'Not set' }}</dd>
+              <dt>Email</dt>
+              <dd>{{ currentUser.email || 'Not set' }}</dd>
             </div>
           </dl>
         </div>
