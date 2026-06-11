@@ -52,3 +52,4 @@ damai:
     null-ttl-minutes: 5
     user-ttl-hours: 6
     session-ttl-hours: 24
+    program-detail-ttl-hours: 2

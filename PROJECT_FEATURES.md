@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-当前项目是一个前后端分离的大麦票务管理系统雏形，已完成用户服务基础能力，并接入 MySQL、Redis、Nacos 和 Vue 前端。
+当前项目是一个前后端分离的大麦票务管理系统雏形，已完成用户服务和节目服务的基础能力，并接入 MySQL、Redis、Nacos 和 Vue 前端。
 
 后端服务地址：
 
@@ -26,9 +26,17 @@ http://127.0.0.1:5173
 4. 用户退出登录。
 5. 登录 token 生成、存储和吊销。
 6. 密码使用 BCrypt 加密存储。
-7. 请求参数校验。
-8. 统一业务异常返回。
-9. SLF4J 接口和业务关键日志。
+7. Redis 缓存手机号、邮箱、token 查询结果，并用空值缓存降低缓存穿透风险。
+8. SLF4J 接口和业务关键日志。
+
+### 节目服务
+
+1. 节目类型创建和查询。
+2. 节目创建，包含节目分组、演出时间、票档信息。
+3. 节目列表查询，支持关键词和类型过滤。
+4. 节目详情查询，返回基础信息、演出时间和票档。
+5. 座位批量初始化。
+6. 座位列表查询。
 
 ### 前端页面
 
@@ -41,19 +49,19 @@ http://127.0.0.1:5173
 
 ## 后端接口
 
+### 用户接口
+
 统一前缀：
 
 ```text
 /api/users
 ```
 
-### 注册
+注册：
 
 ```http
 POST /api/users/register
 ```
-
-请求体：
 
 ```json
 {
@@ -64,15 +72,11 @@ POST /api/users/register
 }
 ```
 
-成功后返回用户信息和 Bearer token。
-
-### 登录
+登录：
 
 ```http
 POST /api/users/login
 ```
-
-请求体：
 
 ```json
 {
@@ -81,33 +85,115 @@ POST /api/users/login
 }
 ```
 
-`login` 可以填写手机号或邮箱。成功后返回用户信息和 Bearer token。
+`login` 可以填写手机号或邮箱。
 
-### 获取当前用户
+获取当前用户：
 
 ```http
 GET /api/users/me
-```
-
-请求头：
-
-```text
 Authorization: Bearer <token>
 ```
 
-### 退出登录
+退出登录：
 
 ```http
 POST /api/users/logout
-```
-
-请求头：
-
-```text
 Authorization: Bearer <token>
 ```
 
-退出后 token 会被吊销，再访问当前用户接口会返回未授权。
+### 节目接口
+
+统一前缀：
+
+```text
+/api/programs
+```
+
+创建类型：
+
+```http
+POST /api/programs/categories
+```
+
+```json
+{
+  "parentId": 0,
+  "name": "演唱会",
+  "type": 1
+}
+```
+
+查询类型：
+
+```http
+GET /api/programs/categories
+```
+
+创建节目：
+
+```http
+POST /api/programs
+```
+
+```json
+{
+  "areaId": 110000,
+  "programCategoryId": 2,
+  "parentProgramCategoryId": 1,
+  "title": "测试演唱会",
+  "actor": "测试歌手",
+  "place": "测试场馆",
+  "detail": "节目详情",
+  "permitChooseSeat": 1,
+  "showTimes": [
+    {
+      "showTime": "2026-08-01T12:00:00Z"
+    }
+  ],
+  "ticketCategories": [
+    {
+      "introduce": "VIP",
+      "price": 680,
+      "totalNumber": 20
+    }
+  ]
+}
+```
+
+节目列表：
+
+```http
+GET /api/programs?keyword=测试&categoryId=2&pageNumber=1&pageSize=20
+```
+
+节目详情：
+
+```http
+GET /api/programs/{programId}
+```
+
+批量初始化座位：
+
+```http
+POST /api/programs/{programId}/seats
+```
+
+```json
+{
+  "ticketCategoryId": 1,
+  "startRow": 1,
+  "endRow": 2,
+  "startCol": 1,
+  "endCol": 3,
+  "seatType": 1
+}
+```
+
+查询座位：
+
+```http
+GET /api/programs/{programId}/seats
+```
 
 ## 数据库表
 
@@ -117,62 +203,26 @@ Authorization: Bearer <token>
 src/main/resources/schema.sql
 ```
 
-当前项目参考 `cloud/damai_user_0.sql`，在单库单表环境下使用以下表：
+### 用户域
 
-### d_user
+参考 `cloud/damai_user_0.sql`，单库版本包含：
 
-用户主表，保存用户基础信息。
+1. `d_user`：用户主表。
+2. `d_user_mobile`：手机号索引表。
+3. `d_user_email`：邮箱索引表。
+4. `d_ticket_user`：购票人表。
+5. `d_user_sessions`：登录会话表。
 
-主要字段：
+### 节目域
 
-1. `id`：用户 ID。
-2. `name`：用户展示名称。
-3. `rel_name`：实名姓名。
-4. `mobile`：手机号。
-5. `password`：加密后的密码。
-6. `email`：邮箱地址。
-7. `email_status`：邮箱认证状态。
-8. `rel_authentication_status`：实名认证状态。
-9. `status`：用户状态。
-10. `create_time`、`edit_time`：创建和更新时间。
+参考 `cloud/damai_program_0.sql`，单库版本包含：
 
-### d_user_mobile
-
-用户手机号索引表，用于手机号登录。
-
-### d_user_email
-
-用户邮箱索引表，用于邮箱登录。
-
-### d_ticket_user
-
-购票人表，保存未来购票流程需要的实名购票人信息，通过 `user_id` 关联用户。
-
-### d_user_sessions
-
-用户登录会话表，保存 token 哈希、过期时间和吊销时间，通过 `user_id` 关联 `d_user`。
-
-## Redis 缓存策略
-
-Redis 用于减少用户和 token 查询对数据库的压力。
-
-当前策略：
-
-1. 手机号查询缓存用户 ID。
-2. 邮箱查询缓存用户 ID。
-3. token 查询缓存 session ID。
-4. 查询不存在的数据时写入短 TTL 空值，降低缓存穿透风险。
-5. 缓存 TTL 会增加随机抖动，降低集中失效风险。
-6. Redis 异常时自动回退数据库，不影响主流程。
-
-默认 Redis 配置：
-
-```yaml
-host: localhost
-port: 6379
-password: 123
-database: 0
-```
+1. `d_program`：节目主表。
+2. `d_program_group`：节目分组表。
+3. `d_program_category`：节目类型表。
+4. `d_program_show_time`：节目演出时间表。
+5. `d_ticket_category`：节目票档表。
+6. `d_seat`：座位表。
 
 ## 技术栈
 
@@ -199,19 +249,19 @@ database: 0
 
 ## 启动方式
 
-### 启动依赖服务
+启动依赖服务：
 
 ```powershell
 docker compose up -d mysql redis nacos
 ```
 
-### 启动后端
+启动后端：
 
 ```powershell
 mvn -s maven-settings.xml spring-boot:run
 ```
 
-### 启动前端
+启动前端：
 
 ```powershell
 cd frontend
@@ -221,7 +271,7 @@ npm run dev
 
 ## 测试与构建
 
-### 后端测试
+后端测试：
 
 ```powershell
 mvn -s maven-settings.xml test
@@ -229,11 +279,14 @@ mvn -s maven-settings.xml test
 
 当前测试覆盖：
 
-1. 注册、邮箱登录、获取当前用户、退出登录完整流程。
+1. 用户注册、邮箱登录、获取当前用户、退出登录完整流程。
 2. 重复手机号注册。
 3. 错误密码登录。
+4. 节目类型创建。
+5. 节目创建、列表、详情。
+6. 座位批量初始化和查询。
 
-### 前端构建
+前端构建：
 
 ```powershell
 cd frontend
@@ -243,12 +296,11 @@ npm run build
 ## 后续可扩展方向
 
 1. 购票人增删改查接口。
-2. 演出管理。
-3. 场次管理。
-4. 票档管理。
-5. 库存管理。
-6. 下单与支付。
-7. 订单查询。
-8. 后台管理员登录。
-9. 接口鉴权拦截器。
-10. Redis 分布式锁或库存扣减能力。
+2. 节目更新和上下架。
+3. 票档库存扣减。
+4. 座位锁定和释放。
+5. 下单与支付。
+6. 订单查询。
+7. 后台管理员登录。
+8. 接口鉴权拦截器。
+9. Redis 分布式锁或库存扣减能力。

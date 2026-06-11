@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.program.mapper.ProgramMapper">
+
+    <resultMap id="ProgramCategoryResultMap" type="com.myown.damai.program.entity.ProgramCategory">
+        <id property="id" column="id"/>
+        <result property="parentId" column="parent_id"/>
+        <result property="name" column="name"/>
+        <result property="type" column="type"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="ProgramResultMap" type="com.myown.damai.program.entity.Program">
+        <id property="id" column="id"/>
+        <result property="programGroupId" column="program_group_id"/>
+        <result property="prime" column="prime"/>
+        <result property="areaId" column="area_id"/>
+        <result property="programCategoryId" column="program_category_id"/>
+        <result property="parentProgramCategoryId" column="parent_program_category_id"/>
+        <result property="title" column="title"/>
+        <result property="actor" column="actor"/>
+        <result property="place" column="place"/>
+        <result property="itemPicture" column="item_picture"/>
+        <result property="preSell" column="pre_sell"/>
+        <result property="preSellInstruction" column="pre_sell_instruction"/>
+        <result property="importantNotice" column="important_notice"/>
+        <result property="detail" column="detail"/>
+        <result property="perOrderLimitPurchaseCount" column="per_order_limit_purchase_count"/>
+        <result property="perAccountLimitPurchaseCount" column="per_account_limit_purchase_count"/>
+        <result property="refundTicketRule" column="refund_ticket_rule"/>
+        <result property="deliveryInstruction" column="delivery_instruction"/>
+        <result property="entryRule" column="entry_rule"/>
+        <result property="childPurchase" column="child_purchase"/>
+        <result property="invoiceSpecification" column="invoice_specification"/>
+        <result property="realTicketPurchaseRule" column="real_ticket_purchase_rule"/>
+        <result property="abnormalOrderDescription" column="abnormal_order_description"/>
+        <result property="kindReminder" column="kind_reminder"/>
+        <result property="performanceDuration" column="performance_duration"/>
+        <result property="entryTime" column="entry_time"/>
+        <result property="minPerformanceCount" column="min_performance_count"/>
+        <result property="mainActor" column="main_actor"/>
+        <result property="minPerformanceDuration" column="min_performance_duration"/>
+        <result property="prohibitedItem" column="prohibited_item"/>
+        <result property="depositSpecification" column="deposit_specification"/>
+        <result property="totalCount" column="total_count"/>
+        <result property="permitRefund" column="permit_refund"/>
+        <result property="refundExplain" column="refund_explain"/>
+        <result property="relNameTicketEntrance" column="rel_name_ticket_entrance"/>
+        <result property="relNameTicketEntranceExplain" column="rel_name_ticket_entrance_explain"/>
+        <result property="permitChooseSeat" column="permit_choose_seat"/>
+        <result property="chooseSeatExplain" column="choose_seat_explain"/>
+        <result property="electronicDeliveryTicket" column="electronic_delivery_ticket"/>
+        <result property="electronicDeliveryTicketExplain" column="electronic_delivery_ticket_explain"/>
+        <result property="electronicInvoice" column="electronic_invoice"/>
+        <result property="electronicInvoiceExplain" column="electronic_invoice_explain"/>
+        <result property="highHeat" column="high_heat"/>
+        <result property="programStatus" column="program_status"/>
+        <result property="issueTime" column="issue_time"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="ShowTimeResultMap" type="com.myown.damai.program.entity.ProgramShowTime">
+        <id property="id" column="id"/>
+        <result property="programId" column="program_id"/>
+        <result property="showTime" column="show_time"/>
+        <result property="showDayTime" column="show_day_time"/>
+        <result property="showWeekTime" column="show_week_time"/>
+        <result property="areaId" column="area_id"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="TicketCategoryResultMap" type="com.myown.damai.program.entity.TicketCategory">
+        <id property="id" column="id"/>
+        <result property="programId" column="program_id"/>
+        <result property="introduce" column="introduce"/>
+        <result property="price" column="price"/>
+        <result property="totalNumber" column="total_number"/>
+        <result property="remainNumber" column="remain_number"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="SeatResultMap" type="com.myown.damai.program.entity.Seat">
+        <id property="id" column="id"/>
+        <result property="programId" column="program_id"/>
+        <result property="ticketCategoryId" column="ticket_category_id"/>
+        <result property="rowCode" column="row_code"/>
+        <result property="colCode" column="col_code"/>
+        <result property="seatType" column="seat_type"/>
+        <result property="price" column="price"/>
+        <result property="sellStatus" column="sell_status"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="ProgramColumns">
+        id, program_group_id, prime, area_id, program_category_id, parent_program_category_id,
+        title, actor, place, item_picture, pre_sell, pre_sell_instruction, important_notice,
+        detail, per_order_limit_purchase_count, per_account_limit_purchase_count,
+        refund_ticket_rule, delivery_instruction, entry_rule, child_purchase,
+        invoice_specification, real_ticket_purchase_rule, abnormal_order_description,
+        kind_reminder, performance_duration, entry_time, min_performance_count,
+        main_actor, min_performance_duration, prohibited_item, deposit_specification,
+        total_count, permit_refund, refund_explain, rel_name_ticket_entrance,
+        rel_name_ticket_entrance_explain, permit_choose_seat, choose_seat_explain,
+        electronic_delivery_ticket, electronic_delivery_ticket_explain, electronic_invoice,
+        electronic_invoice_explain, high_heat, program_status, issue_time,
+        create_time, edit_time, status
+    </sql>
+
+    <insert id="insertCategory" parameterType="com.myown.damai.program.entity.ProgramCategory"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_program_category
+            (parent_id, name, type, create_time, edit_time, status)
+        VALUES
+            (#{parentId}, #{name}, #{type}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectCategoryById" resultMap="ProgramCategoryResultMap">
+        SELECT id, parent_id, name, type, create_time, edit_time, status
+        FROM d_program_category
+        WHERE id = #{id}
+          AND status = 1
+    </select>
+
+    <select id="selectCategories" resultMap="ProgramCategoryResultMap">
+        SELECT id, parent_id, name, type, create_time, edit_time, status
+        FROM d_program_category
+        WHERE status = 1
+        ORDER BY parent_id ASC, type ASC, id ASC
+    </select>
+
+    <insert id="insertGroup" parameterType="com.myown.damai.program.entity.ProgramGroup"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_program_group
+            (program_json, recent_show_time, create_time, edit_time, status)
+        VALUES
+            (#{programJson}, #{recentShowTime}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <insert id="insertProgram" parameterType="com.myown.damai.program.entity.Program"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_program
+            (program_group_id, prime, area_id, program_category_id, parent_program_category_id,
+             title, actor, place, item_picture, pre_sell, pre_sell_instruction, important_notice,
+             detail, per_order_limit_purchase_count, per_account_limit_purchase_count,
+             refund_ticket_rule, delivery_instruction, entry_rule, child_purchase,
+             invoice_specification, real_ticket_purchase_rule, abnormal_order_description,
+             kind_reminder, performance_duration, entry_time, min_performance_count,
+             main_actor, min_performance_duration, prohibited_item, deposit_specification,
+             total_count, permit_refund, refund_explain, rel_name_ticket_entrance,
+             rel_name_ticket_entrance_explain, permit_choose_seat, choose_seat_explain,
+             electronic_delivery_ticket, electronic_delivery_ticket_explain, electronic_invoice,
+             electronic_invoice_explain, high_heat, program_status, issue_time,
+             create_time, edit_time, status)
+        VALUES
+            (#{programGroupId}, #{prime}, #{areaId}, #{programCategoryId}, #{parentProgramCategoryId},
+             #{title}, #{actor}, #{place}, #{itemPicture}, #{preSell}, #{preSellInstruction}, #{importantNotice},
+             #{detail}, #{perOrderLimitPurchaseCount}, #{perAccountLimitPurchaseCount},
+             #{refundTicketRule}, #{deliveryInstruction}, #{entryRule}, #{childPurchase},
+             #{invoiceSpecification}, #{realTicketPurchaseRule}, #{abnormalOrderDescription},
+             #{kindReminder}, #{performanceDuration}, #{entryTime}, #{minPerformanceCount},
+             #{mainActor}, #{minPerformanceDuration}, #{prohibitedItem}, #{depositSpecification},
+             #{totalCount}, #{permitRefund}, #{refundExplain}, #{relNameTicketEntrance},
+             #{relNameTicketEntranceExplain}, #{permitChooseSeat}, #{chooseSeatExplain},
+             #{electronicDeliveryTicket}, #{electronicDeliveryTicketExplain}, #{electronicInvoice},
+             #{electronicInvoiceExplain}, #{highHeat}, #{programStatus}, #{issueTime},
+             #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectProgramById" resultMap="ProgramResultMap">
+        SELECT <include refid="ProgramColumns"/>
+        FROM d_program
+        WHERE id = #{id}
+          AND status = 1
+          AND program_status = 1
+    </select>
+
+    <select id="selectPrograms" resultMap="ProgramResultMap">
+        SELECT <include refid="ProgramColumns"/>
+        FROM d_program
+        WHERE status = 1
+          AND program_status = 1
+        <if test="keyword != null and keyword != ''">
+          AND title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="categoryId != null">
+          AND (program_category_id = #{categoryId} OR parent_program_category_id = #{categoryId})
+        </if>
+        <if test="areaId != null">
+          AND area_id = #{areaId}
+        </if>
+        ORDER BY high_heat DESC, issue_time DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <insert id="insertShowTime" parameterType="com.myown.damai.program.entity.ProgramShowTime"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_program_show_time
+            (program_id, show_time, show_day_time, show_week_time, area_id, create_time, edit_time, status)
+        VALUES
+            (#{programId}, #{showTime}, #{showDayTime}, #{showWeekTime}, #{areaId}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectShowTimesByProgramId" resultMap="ShowTimeResultMap">
+        SELECT id, program_id, show_time, show_day_time, show_week_time, area_id, create_time, edit_time, status
+        FROM d_program_show_time
+        WHERE program_id = #{programId}
+          AND status = 1
+        ORDER BY show_time ASC
+    </select>
+
+    <insert id="insertTicketCategory" parameterType="com.myown.damai.program.entity.TicketCategory"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_ticket_category
+            (program_id, introduce, price, total_number, remain_number, create_time, edit_time, status)
+        VALUES
+            (#{programId}, #{introduce}, #{price}, #{totalNumber}, #{remainNumber}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectTicketCategoryById" resultMap="TicketCategoryResultMap">
+        SELECT id, program_id, introduce, price, total_number, remain_number, create_time, edit_time, status
+        FROM d_ticket_category
+        WHERE id = #{id}
+          AND status = 1
+    </select>
+
+    <select id="selectTicketCategoriesByProgramId" resultMap="TicketCategoryResultMap">
+        SELECT id, program_id, introduce, price, total_number, remain_number, create_time, edit_time, status
+        FROM d_ticket_category
+        WHERE program_id = #{programId}
+          AND status = 1
+        ORDER BY price ASC, id ASC
+    </select>
+
+    <insert id="insertSeats">
+        INSERT INTO d_seat
+            (program_id, ticket_category_id, row_code, col_code, seat_type, price, sell_status, create_time, edit_time, status)
+        VALUES
+        <foreach collection="seats" item="seat" separator=",">
+            (#{seat.programId}, #{seat.ticketCategoryId}, #{seat.rowCode}, #{seat.colCode}, #{seat.seatType},
+             #{seat.price}, #{seat.sellStatus}, #{seat.createdAt}, #{seat.updatedAt}, #{seat.status})
+        </foreach>
+    </insert>
+
+    <select id="selectSeatsByProgramId" resultMap="SeatResultMap">
+        SELECT id, program_id, ticket_category_id, row_code, col_code, seat_type, price, sell_status, create_time, edit_time, status
+        FROM d_seat
+        WHERE program_id = #{programId}
+          AND status = 1
+        ORDER BY row_code ASC, col_code ASC
+    </select>
+</mapper>
