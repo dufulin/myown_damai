@@ -1,0 +1,47 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: damai-program-service
+  datasource:
+    url: ${DAMAI_PROGRAM_DB_URL:${DAMAI_DB_URL:jdbc:mysql://localhost:3306/myown_damai?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
+    username: ${DAMAI_DB_USERNAME:root}
+    password: ${DAMAI_DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: ${DAMAI_REDIS_HOST:localhost}
+      port: ${DAMAI_REDIS_PORT:6379}
+      password: ${DAMAI_REDIS_PASSWORD:123}
+      database: ${DAMAI_REDIS_DATABASE:0}
+      timeout: 2s
+  cloud:
+    nacos:
+      username: nacos
+      password: nacos
+      discovery:
+        enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
+        register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+        service: ${spring.application.name}
+        group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+damai:
+  cache:
+    redis-enabled: true
+    null-ttl-minutes: 5
+    program-detail-ttl-hours: 2

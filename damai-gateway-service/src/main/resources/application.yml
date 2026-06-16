@@ -1,0 +1,62 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: damai-gateway-service
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: ${DAMAI_REDIS_HOST:localhost}
+      port: ${DAMAI_REDIS_PORT:6379}
+      password: ${DAMAI_REDIS_PASSWORD:123}
+      database: ${DAMAI_REDIS_DATABASE:0}
+      timeout: 2s
+  cloud:
+    nacos:
+      username: nacos
+      password: nacos
+      discovery:
+        enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
+        register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+        service: ${spring.application.name}
+        group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - http://localhost:5173
+              - http://127.0.0.1:5173
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+      routes:
+        - id: damai-user-service
+          uri: lb://damai-user-service
+          predicates:
+            - Path=/api/users/**
+        - id: damai-program-service
+          uri: lb://damai-program-service
+          predicates:
+            - Path=/api/programs/**
+
+damai:
+  gateway:
+    auth-enabled: true
+    user-service-url: http://damai-user-service
+    rate-limit-enabled: true
+    rate-limit:
+      max-requests: 120
+      window-seconds: 60
+  cache:
+    redis-enabled: true
