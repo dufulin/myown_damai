@@ -10,14 +10,19 @@ const loading = ref(false)
 const programLoading = ref(false)
 const homeProgramLoading = ref(false)
 const detailLoading = ref(false)
+const orderLoading = ref(false)
+const orderListLoading = ref(false)
 const programCategories = ref([])
 const homePrograms = ref([])
 const programs = ref([])
+const orders = ref([])
 const selectedProgramDetail = ref(null)
 const viewMode = ref('home')
 const searchKeyword = ref('')
 const pageNumber = ref(1)
+const orderPageNumber = ref(1)
 const pageSize = 6
+const orderPageSize = 8
 const homePageSize = 10
 const programSheetOpen = ref(false)
 const notice = reactive({ type: 'info', text: `Backend API: ${apiBase}` })
@@ -34,6 +39,12 @@ const form = reactive({
   name: '',
   mobile: '',
   email: ''
+})
+
+const orderForm = reactive({
+  showTimeId: '',
+  ticketCategoryId: '',
+  quantity: 1
 })
 
 const areaOptions = [
@@ -57,9 +68,17 @@ const fallbackCategories = [
 const isLoggedIn = computed(() => Boolean(token.value && currentUser.value))
 const title = computed(() => (mode.value === 'login' ? 'Login' : 'Register'))
 const hasNextPage = computed(() => programs.value.length === pageSize)
+const hasNextOrderPage = computed(() => orders.value.length === orderPageSize)
 const selectedProgram = computed(() => selectedProgramDetail.value?.program || null)
 const showTimes = computed(() => selectedProgramDetail.value?.showTimes || [])
 const ticketCategories = computed(() => selectedProgramDetail.value?.ticketCategories || [])
+const selectedShowTime = computed(() => showTimes.value.find((showTime) => String(showTime.id) === String(orderForm.showTimeId)) || null)
+const selectedTicketCategory = computed(() => ticketCategories.value.find((ticket) => String(ticket.id) === String(orderForm.ticketCategoryId)) || null)
+const orderTotal = computed(() => {
+  const price = Number(selectedTicketCategory.value?.price || 0)
+  return (price * Number(orderForm.quantity || 0)).toFixed(2)
+})
+const canCreateOrder = computed(() => Boolean(selectedProgram.value && selectedShowTime.value && selectedTicketCategory.value && Number(orderForm.quantity) > 0))
 const visibleCategories = computed(() => {
   const parents = programCategories.value.filter((category) => category.parentId === 0 || category.type === 1)
   return parents.length > 0 ? [{ id: null, name: 'All Types', keyword: '' }, ...parents] : fallbackCategories
@@ -134,6 +153,26 @@ function formatDateTime(value) {
     return 'Pending'
   }
   return new Date(value).toLocaleString()
+}
+
+/**
+ * Converts an order status code to user-facing text.
+ */
+function orderStatusText(status) {
+  const statusMap = {
+    1: 'Unpaid',
+    2: 'Canceled',
+    3: 'Paid',
+    4: 'Refunded'
+  }
+  return statusMap[status] || 'Unknown'
+}
+
+/**
+ * Builds a CSS class for the order status pill.
+ */
+function orderStatusClass(status) {
+  return `order-status status-${status || 'unknown'}`
 }
 
 /**
@@ -250,6 +289,7 @@ async function logout() {
     currentUser.value = null
     programSheetOpen.value = false
     programs.value = []
+    orders.value = []
     homePrograms.value = []
     selectedProgramDetail.value = null
     viewMode.value = 'home'
@@ -341,6 +381,7 @@ async function openProgramDetail(programId) {
   try {
     const result = await request(`/api/programs/${programId}`)
     selectedProgramDetail.value = result.data
+    resetOrderForm()
     programSheetOpen.value = false
     viewMode.value = 'detail'
     setNotice('success', 'Program detail loaded.')
@@ -349,6 +390,138 @@ async function openProgramDetail(programId) {
   } finally {
     detailLoading.value = false
   }
+}
+
+/**
+ * Selects default order options from the loaded program detail.
+ */
+function resetOrderForm() {
+  orderForm.showTimeId = showTimes.value[0]?.id ? String(showTimes.value[0].id) : ''
+  orderForm.ticketCategoryId = ticketCategories.value[0]?.id ? String(ticketCategories.value[0].id) : ''
+  orderForm.quantity = 1
+}
+
+/**
+ * Creates an unpaid order from the selected show time and ticket category.
+ */
+async function createOrder() {
+  if (!canCreateOrder.value) {
+    setNotice('error', '请选择演出时间、票档和数量。')
+    return
+  }
+
+  orderLoading.value = true
+  try {
+    const ticketCount = Number(orderForm.quantity)
+    const ticketUsers = Array.from({ length: ticketCount }, () => ({
+      ticketUserId: currentUser.value.id,
+      seatId: null,
+      // Seat choice is not implemented yet, so the backend receives a stable placeholder.
+      seatInfo: '未选择座位',
+      ticketCategoryId: Number(orderForm.ticketCategoryId),
+      orderPrice: selectedTicketCategory.value.price
+    }))
+    const body = {
+      programId: selectedProgram.value.id,
+      programItemPicture: selectedProgram.value.itemPicture,
+      userId: currentUser.value.id,
+      programTitle: selectedProgram.value.title,
+      programPlace: selectedProgram.value.place,
+      programShowTime: selectedShowTime.value.showTime,
+      programPermitChooseSeat: selectedProgram.value.permitChooseSeat || 0,
+      distributionMode: '电子票',
+      takeTicketMode: '线上取票',
+      payOrderType: 1,
+      ticketUsers
+    }
+    const result = await request('/api/orders', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    })
+    setNotice('success', `订单创建成功：${result.data.orderNumber}`)
+    await loadOrders()
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    orderLoading.value = false
+  }
+}
+
+/**
+ * Opens the profile center and loads the current user's orders.
+ */
+async function openProfileCenter() {
+  viewMode.value = 'profile'
+  programSheetOpen.value = false
+  selectedProgramDetail.value = null
+  orderPageNumber.value = 1
+  await loadOrders()
+}
+
+/**
+ * Loads one page of orders for the current user.
+ */
+async function loadOrders() {
+  if (!currentUser.value?.id) {
+    return
+  }
+
+  orderListLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      userId: String(currentUser.value.id),
+      pageNumber: String(orderPageNumber.value),
+      pageSize: String(orderPageSize)
+    })
+    const result = await request(`/api/orders?${params.toString()}`)
+    orders.value = result.data || []
+  } catch (error) {
+    orders.value = []
+    setNotice('error', error.message)
+  } finally {
+    orderListLoading.value = false
+  }
+}
+
+/**
+ * Cancels one unpaid order and refreshes the order list.
+ */
+async function cancelOrder(orderNumber) {
+  orderListLoading.value = true
+  try {
+    await request(`/api/orders/${orderNumber}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Canceled by user' })
+    })
+    setNotice('success', `订单已取消：${orderNumber}`)
+    await loadOrders()
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    orderListLoading.value = false
+  }
+}
+
+/**
+ * Moves the order list to the previous page.
+ */
+async function previousOrderPage() {
+  if (orderPageNumber.value <= 1) {
+    return
+  }
+  orderPageNumber.value -= 1
+  await loadOrders()
+}
+
+/**
+ * Moves the order list to the next page.
+ */
+async function nextOrderPage() {
+  if (!hasNextOrderPage.value) {
+    return
+  }
+  orderPageNumber.value += 1
+  await loadOrders()
 }
 
 /**
@@ -398,9 +571,14 @@ onMounted(loadCurrentUser)
         <p class="eyebrow">DAMAI TICKET OPS</p>
         <h1>{{ isLoggedIn ? 'Program Home' : 'Damai Ticket Management' }}</h1>
       </div>
-      <button v-if="isLoggedIn" class="ghost-button" :disabled="loading" @click="logout">
-        Logout
-      </button>
+      <div v-if="isLoggedIn" class="topbar-actions">
+        <button class="ghost-button" type="button" :disabled="orderListLoading" @click="openProfileCenter">
+          个人中心
+        </button>
+        <button class="ghost-button" :disabled="loading" @click="logout">
+          Logout
+        </button>
+      </div>
     </section>
 
     <section v-if="!isLoggedIn" class="workspace">
@@ -522,6 +700,41 @@ onMounted(loadCurrentUser)
         </article>
 
         <article class="detail-section wide">
+          <p class="eyebrow">下单</p>
+          <div class="order-form">
+            <label>
+              <span>演出时间</span>
+              <select v-model="orderForm.showTimeId">
+                <option value="" disabled>请选择演出时间</option>
+                <option v-for="showTime in showTimes" :key="showTime.id" :value="String(showTime.id)">
+                  {{ formatDateTime(showTime.showTime) }} {{ showTime.showWeekTime || '' }}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>票档</span>
+              <select v-model="orderForm.ticketCategoryId">
+                <option value="" disabled>请选择票档</option>
+                <option v-for="ticket in ticketCategories" :key="ticket.id" :value="String(ticket.id)">
+                  {{ ticket.introduce }} / CNY {{ ticket.price }}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>数量</span>
+              <input v-model.number="orderForm.quantity" type="number" min="1" max="6" />
+            </label>
+            <div class="order-total">
+              <span>合计</span>
+              <strong>CNY {{ orderTotal }}</strong>
+            </div>
+            <button class="primary-button" type="button" :disabled="orderLoading || !canCreateOrder" @click="createOrder">
+              {{ orderLoading ? '下单中...' : '下单' }}
+            </button>
+          </div>
+        </article>
+
+        <article class="detail-section wide">
           <p class="eyebrow">PURCHASE NOTICE</p>
           <div v-if="noticeItems.length === 0" class="muted">No purchase notices available.</div>
           <div v-else class="notice-grid">
@@ -531,6 +744,110 @@ onMounted(loadCurrentUser)
             </div>
           </div>
         </article>
+      </section>
+    </section>
+
+    <section v-else-if="viewMode === 'profile'" class="profile-layout">
+      <div class="detail-toolbar">
+        <button class="ghost-button" type="button" @click="initializeHome">
+          Back
+        </button>
+        <p :class="['notice', notice.type]">{{ notice.text }}</p>
+      </div>
+
+      <section class="profile-strip">
+        <div>
+          <p class="eyebrow">个人中心</p>
+          <strong>{{ currentUser.name || currentUser.username || currentUser.mobile }}</strong>
+        </div>
+        <dl>
+          <div>
+            <dt>ID</dt>
+            <dd>{{ currentUser.id }}</dd>
+          </div>
+          <div>
+            <dt>Mobile</dt>
+            <dd>{{ currentUser.mobile || currentUser.phone || 'Not set' }}</dd>
+          </div>
+          <div>
+            <dt>Email</dt>
+            <dd>{{ currentUser.email || 'Not set' }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="order-section">
+        <div class="featured-header">
+          <div>
+            <p class="eyebrow">订单</p>
+            <h2>我的订单</h2>
+          </div>
+          <button class="ghost-button" type="button" :disabled="orderListLoading" @click="loadOrders">
+            刷新
+          </button>
+        </div>
+
+        <div v-if="orderListLoading" class="empty-state sheet-state">
+          <strong>订单加载中</strong>
+          <p>正在获取你的最新订单。</p>
+        </div>
+        <div v-else-if="orders.length === 0" class="empty-state sheet-state">
+          <strong>暂无订单</strong>
+          <p>可以从节目详情页选择票档后下单。</p>
+        </div>
+        <div v-else class="order-list">
+          <article v-for="order in orders" :key="order.orderNumber" class="order-card">
+            <div class="order-card-main">
+              <div>
+                <p class="eyebrow">NO. {{ order.orderNumber }}</p>
+                <h3>{{ order.programTitle }}</h3>
+                <p>{{ order.programPlace || 'Venue pending' }} / {{ formatDateTime(order.programShowTime) }}</p>
+              </div>
+              <span :class="orderStatusClass(order.orderStatus)">
+                {{ orderStatusText(order.orderStatus) }}
+              </span>
+            </div>
+            <dl class="order-meta">
+              <div>
+                <dt>Amount</dt>
+                <dd>CNY {{ order.orderPrice }}</dd>
+              </div>
+              <div>
+                <dt>Created</dt>
+                <dd>{{ formatDateTime(order.createOrderTime) }}</dd>
+              </div>
+              <div>
+                <dt>Expires</dt>
+                <dd>{{ formatDateTime(order.expireTime) }}</dd>
+              </div>
+            </dl>
+            <div class="order-ticket-list">
+              <span v-for="ticket in order.ticketUsers" :key="ticket.id">
+                票档 #{{ ticket.ticketCategoryId }} / CNY {{ ticket.orderPrice }}
+              </span>
+            </div>
+            <div class="order-actions">
+              <button
+                class="ghost-button"
+                type="button"
+                :disabled="orderListLoading || order.orderStatus !== 1"
+                @click="cancelOrder(order.orderNumber)"
+              >
+                取消订单
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div class="pagination">
+          <button class="ghost-button" type="button" :disabled="orderPageNumber <= 1 || orderListLoading" @click="previousOrderPage">
+            Previous
+          </button>
+          <span>Page {{ orderPageNumber }}</span>
+          <button class="ghost-button" type="button" :disabled="!hasNextOrderPage || orderListLoading" @click="nextOrderPage">
+            Next
+          </button>
+        </div>
       </section>
     </section>
 

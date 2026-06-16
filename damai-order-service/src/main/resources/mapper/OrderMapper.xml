@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.order.mapper.OrderMapper">
+
+    <resultMap id="OrderResultMap" type="com.myown.damai.order.entity.Order">
+        <id property="id" column="id"/>
+        <result property="orderNumber" column="order_number"/>
+        <result property="programId" column="program_id"/>
+        <result property="programItemPicture" column="program_item_picture"/>
+        <result property="userId" column="user_id"/>
+        <result property="programTitle" column="program_title"/>
+        <result property="programPlace" column="program_place"/>
+        <result property="programShowTime" column="program_show_time"/>
+        <result property="programPermitChooseSeat" column="program_permit_choose_seat"/>
+        <result property="distributionMode" column="distribution_mode"/>
+        <result property="takeTicketMode" column="take_ticket_mode"/>
+        <result property="orderPrice" column="order_price"/>
+        <result property="payOrderType" column="pay_order_type"/>
+        <result property="orderStatus" column="order_status"/>
+        <result property="expireTime" column="expire_time"/>
+        <result property="createOrderTime" column="create_order_time"/>
+        <result property="cancelOrderTime" column="cancel_order_time"/>
+        <result property="payOrderTime" column="pay_order_time"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="OrderTicketUserResultMap" type="com.myown.damai.order.entity.OrderTicketUser">
+        <id property="id" column="id"/>
+        <result property="orderNumber" column="order_number"/>
+        <result property="programId" column="program_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="ticketUserId" column="ticket_user_id"/>
+        <result property="seatId" column="seat_id"/>
+        <result property="seatInfo" column="seat_info"/>
+        <result property="ticketCategoryId" column="ticket_category_id"/>
+        <result property="orderPrice" column="order_price"/>
+        <result property="payOrderPrice" column="pay_order_price"/>
+        <result property="payOrderType" column="pay_order_type"/>
+        <result property="orderStatus" column="order_status"/>
+        <result property="createOrderTime" column="create_order_time"/>
+        <result property="cancelOrderTime" column="cancel_order_time"/>
+        <result property="payOrderTime" column="pay_order_time"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="OrderColumns">
+        id, order_number, program_id, program_item_picture, user_id, program_title,
+        program_place, program_show_time, program_permit_choose_seat, distribution_mode,
+        take_ticket_mode, order_price, pay_order_type, order_status, expire_time,
+        create_order_time, cancel_order_time, pay_order_time, create_time, edit_time, status
+    </sql>
+
+    <insert id="insertOrder" parameterType="com.myown.damai.order.entity.Order"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_order
+            (order_number, program_id, program_item_picture, user_id, program_title,
+             program_place, program_show_time, program_permit_choose_seat, distribution_mode,
+             take_ticket_mode, order_price, pay_order_type, order_status, expire_time,
+             create_order_time, cancel_order_time, pay_order_time, create_time, edit_time, status)
+        VALUES
+            (#{orderNumber}, #{programId}, #{programItemPicture}, #{userId}, #{programTitle},
+             #{programPlace}, #{programShowTime}, #{programPermitChooseSeat}, #{distributionMode},
+             #{takeTicketMode}, #{orderPrice}, #{payOrderType}, #{orderStatus}, #{expireTime},
+             #{createOrderTime}, #{cancelOrderTime}, #{payOrderTime}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <insert id="insertTicketUsers" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_order_ticket_user
+            (order_number, program_id, user_id, ticket_user_id, seat_id, seat_info,
+             ticket_category_id, order_price, pay_order_price, pay_order_type, order_status,
+             create_order_time, cancel_order_time, pay_order_time, create_time, edit_time, status)
+        VALUES
+        <foreach collection="ticketUsers" item="item" separator=",">
+            (#{item.orderNumber}, #{item.programId}, #{item.userId}, #{item.ticketUserId}, #{item.seatId}, #{item.seatInfo},
+             #{item.ticketCategoryId}, #{item.orderPrice}, #{item.payOrderPrice}, #{item.payOrderType}, #{item.orderStatus},
+             #{item.createOrderTime}, #{item.cancelOrderTime}, #{item.payOrderTime}, #{item.createdAt}, #{item.updatedAt}, #{item.status})
+        </foreach>
+    </insert>
+
+    <select id="selectOrderByOrderNumber" resultMap="OrderResultMap">
+        SELECT <include refid="OrderColumns"/>
+        FROM d_order
+        WHERE order_number = #{orderNumber}
+          AND status = 1
+    </select>
+
+    <select id="selectOrdersByUserId" resultMap="OrderResultMap">
+        SELECT <include refid="OrderColumns"/>
+        FROM d_order
+        WHERE user_id = #{userId}
+          AND status = 1
+        ORDER BY create_order_time DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectTicketUsersByOrderNumber" resultMap="OrderTicketUserResultMap">
+        SELECT id, order_number, program_id, user_id, ticket_user_id, seat_id, seat_info,
+               ticket_category_id, order_price, pay_order_price, pay_order_type, order_status,
+               create_order_time, cancel_order_time, pay_order_time, create_time, edit_time, status
+        FROM d_order_ticket_user
+        WHERE order_number = #{orderNumber}
+          AND status = 1
+        ORDER BY id ASC
+    </select>
+
+    <update id="cancelUnpaidOrder">
+        UPDATE d_order
+        SET order_status = #{canceledStatus},
+            cancel_order_time = #{now},
+            edit_time = #{now}
+        WHERE order_number = #{orderNumber}
+          AND order_status = #{unpaidStatus}
+          AND status = 1
+    </update>
+
+    <update id="cancelTicketUsersByOrderNumber">
+        UPDATE d_order_ticket_user
+        SET order_status = #{canceledStatus},
+            cancel_order_time = #{now},
+            edit_time = #{now}
+        WHERE order_number = #{orderNumber}
+          AND status = 1
+    </update>
+
+    <select id="selectExpiredUnpaidOrderNumbers" resultType="java.lang.Long">
+        SELECT order_number
+        FROM d_order
+        WHERE order_status = #{unpaidStatus}
+          AND expire_time &lt;= #{now}
+          AND status = 1
+        ORDER BY expire_time ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

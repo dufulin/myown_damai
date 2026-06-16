@@ -22,6 +22,7 @@
         <module>damai-common</module>
         <module>damai-user-service</module>
         <module>damai-program-service</module>
+        <module>damai-order-service</module>
         <module>damai-gateway-service</module>
     </modules>
 
