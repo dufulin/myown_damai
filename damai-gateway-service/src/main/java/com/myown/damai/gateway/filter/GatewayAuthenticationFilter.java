@@ -110,6 +110,7 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
         HttpMethod method = exchange.getRequest().getMethod();
         return !path.startsWith("/api/")
                 || HttpMethod.OPTIONS.equals(method)
+                || isPublicPayEndpoint(path, method)
                 || isPublicUserEndpoint(path, method);
     }
 
@@ -119,5 +120,13 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     private boolean isPublicUserEndpoint(String path, HttpMethod method) {
         return HttpMethod.POST.equals(method)
                 && ("/api/users/login".equals(path) || "/api/users/register".equals(path));
+    }
+
+    /**
+     * Checks whether the request is a public payment provider callback.
+     */
+    private boolean isPublicPayEndpoint(String path, HttpMethod method) {
+        return HttpMethod.POST.equals(method)
+                && "/api/pay/alipay/notify".equals(path);
     }
 }

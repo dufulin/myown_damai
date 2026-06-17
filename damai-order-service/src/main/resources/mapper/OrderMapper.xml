@@ -98,6 +98,20 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <select id="selectLatestOrderByUserIdAndProgramId" resultMap="OrderResultMap">
+        SELECT <include refid="OrderColumns"/>
+        FROM d_order
+        WHERE user_id = #{userId}
+          AND program_id = #{programId}
+          AND order_status IN
+          <foreach collection="orderStatuses" item="orderStatus" open="(" separator="," close=")">
+              #{orderStatus}
+          </foreach>
+          AND status = 1
+        ORDER BY create_order_time DESC, id DESC
+        LIMIT 1
+    </select>
+
     <select id="selectTicketUsersByOrderNumber" resultMap="OrderTicketUserResultMap">
         SELECT id, order_number, program_id, user_id, ticket_user_id, seat_id, seat_info,
                ticket_category_id, order_price, pay_order_price, pay_order_type, order_status,
@@ -123,6 +137,26 @@
         SET order_status = #{canceledStatus},
             cancel_order_time = #{now},
             edit_time = #{now}
+        WHERE order_number = #{orderNumber}
+          AND status = 1
+    </update>
+
+    <update id="payUnpaidOrder">
+        UPDATE d_order
+        SET order_status = #{paidStatus},
+            pay_order_time = #{payTime},
+            edit_time = #{payTime}
+        WHERE order_number = #{orderNumber}
+          AND order_status = #{unpaidStatus}
+          AND status = 1
+    </update>
+
+    <update id="payTicketUsersByOrderNumber">
+        UPDATE d_order_ticket_user
+        SET order_status = #{paidStatus},
+            pay_order_price = order_price,
+            pay_order_time = #{payTime},
+            edit_time = #{payTime}
         WHERE order_number = #{orderNumber}
           AND status = 1
     </update>

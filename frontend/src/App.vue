@@ -16,6 +16,7 @@ const programCategories = ref([])
 const homePrograms = ref([])
 const programs = ref([])
 const orders = ref([])
+const ticketUsers = ref([])
 const selectedProgramDetail = ref(null)
 const viewMode = ref('home')
 const searchKeyword = ref('')
@@ -44,7 +45,13 @@ const form = reactive({
 const orderForm = reactive({
   showTimeId: '',
   ticketCategoryId: '',
-  quantity: 1
+  ticketUserIds: []
+})
+
+const ticketUserForm = reactive({
+  relName: '',
+  idType: 1,
+  idNumber: ''
 })
 
 const areaOptions = [
@@ -76,9 +83,9 @@ const selectedShowTime = computed(() => showTimes.value.find((showTime) => Strin
 const selectedTicketCategory = computed(() => ticketCategories.value.find((ticket) => String(ticket.id) === String(orderForm.ticketCategoryId)) || null)
 const orderTotal = computed(() => {
   const price = Number(selectedTicketCategory.value?.price || 0)
-  return (price * Number(orderForm.quantity || 0)).toFixed(2)
+  return (price * orderForm.ticketUserIds.length).toFixed(2)
 })
-const canCreateOrder = computed(() => Boolean(selectedProgram.value && selectedShowTime.value && selectedTicketCategory.value && Number(orderForm.quantity) > 0))
+const canCreateOrder = computed(() => Boolean(selectedProgram.value && selectedShowTime.value && selectedTicketCategory.value && orderForm.ticketUserIds.length > 0))
 const visibleCategories = computed(() => {
   const parents = programCategories.value.filter((category) => category.parentId === 0 || category.type === 1)
   return parents.length > 0 ? [{ id: null, name: 'All Types', keyword: '' }, ...parents] : fallbackCategories
@@ -238,7 +245,7 @@ async function loadCurrentUser() {
  */
 async function initializeHome() {
   viewMode.value = 'home'
-  await Promise.all([loadProgramCategories(), loadHomePrograms()])
+  await Promise.all([loadProgramCategories(), loadHomePrograms(), loadTicketUsers()])
 }
 
 /**
@@ -290,6 +297,7 @@ async function logout() {
     programSheetOpen.value = false
     programs.value = []
     orders.value = []
+    ticketUsers.value = []
     homePrograms.value = []
     selectedProgramDetail.value = null
     viewMode.value = 'home'
@@ -398,7 +406,7 @@ async function openProgramDetail(programId) {
 function resetOrderForm() {
   orderForm.showTimeId = showTimes.value[0]?.id ? String(showTimes.value[0].id) : ''
   orderForm.ticketCategoryId = ticketCategories.value[0]?.id ? String(ticketCategories.value[0].id) : ''
-  orderForm.quantity = 1
+  orderForm.ticketUserIds = ticketUsers.value[0]?.id ? [String(ticketUsers.value[0].id)] : []
 }
 
 /**
@@ -406,15 +414,14 @@ function resetOrderForm() {
  */
 async function createOrder() {
   if (!canCreateOrder.value) {
-    setNotice('error', '请选择演出时间、票档和数量。')
+    setNotice('error', '请选择演出时间、票档和购票人。')
     return
   }
 
   orderLoading.value = true
   try {
-    const ticketCount = Number(orderForm.quantity)
-    const ticketUsers = Array.from({ length: ticketCount }, () => ({
-      ticketUserId: currentUser.value.id,
+    const orderTicketUsers = orderForm.ticketUserIds.map((ticketUserId) => ({
+      ticketUserId: Number(ticketUserId),
       seatId: null,
       // Seat choice is not implemented yet, so the backend receives a stable placeholder.
       seatInfo: '未选择座位',
@@ -432,7 +439,7 @@ async function createOrder() {
       distributionMode: '电子票',
       takeTicketMode: '线上取票',
       payOrderType: 1,
-      ticketUsers
+      ticketUsers: orderTicketUsers
     }
     const result = await request('/api/orders', {
       method: 'POST',
@@ -448,6 +455,66 @@ async function createOrder() {
 }
 
 /**
+ * Loads ticket buyers for the current user.
+ */
+async function loadTicketUsers() {
+  if (!currentUser.value?.id) {
+    return
+  }
+
+  try {
+    const result = await request('/api/users/ticket-users')
+    ticketUsers.value = result.data || []
+  } catch (error) {
+    ticketUsers.value = []
+    setNotice('error', error.message)
+  }
+}
+
+/**
+ * Creates a real-name ticket buyer in the user service.
+ */
+async function createTicketUser() {
+  orderListLoading.value = true
+  try {
+    const result = await request('/api/users/ticket-users', {
+      method: 'POST',
+      body: JSON.stringify({
+        relName: ticketUserForm.relName,
+        idType: Number(ticketUserForm.idType),
+        idNumber: ticketUserForm.idNumber
+      })
+    })
+    ticketUsers.value = [result.data, ...ticketUsers.value]
+    ticketUserForm.relName = ''
+    ticketUserForm.idType = 1
+    ticketUserForm.idNumber = ''
+    setNotice('success', `购票人已添加：${result.data.relName}`)
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    orderListLoading.value = false
+  }
+}
+
+/**
+ * Deletes one real-name ticket buyer and removes it from local selection.
+ */
+async function deleteTicketUser(ticketUserId) {
+  orderListLoading.value = true
+  try {
+    await request(`/api/users/ticket-users/${ticketUserId}`, { method: 'DELETE' })
+    ticketUsers.value = ticketUsers.value.filter((ticketUser) => ticketUser.id !== ticketUserId)
+    orderForm.ticketUserIds = orderForm.ticketUserIds.filter((id) => String(id) !== String(ticketUserId))
+    setNotice('success', '购票人已删除。')
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    orderListLoading.value = false
+  }
+}
+
+/**
  * Opens the profile center and loads the current user's orders.
  */
 async function openProfileCenter() {
@@ -455,7 +522,7 @@ async function openProfileCenter() {
   programSheetOpen.value = false
   selectedProgramDetail.value = null
   orderPageNumber.value = 1
-  await loadOrders()
+  await Promise.all([loadOrders(), loadTicketUsers()])
 }
 
 /**
@@ -494,6 +561,28 @@ async function cancelOrder(orderNumber) {
       body: JSON.stringify({ reason: 'Canceled by user' })
     })
     setNotice('success', `订单已取消：${orderNumber}`)
+    await loadOrders()
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    orderListLoading.value = false
+  }
+}
+
+/**
+ * Creates an Alipay payment form and submits it in a new browser window.
+ */
+async function payOrder(order) {
+  orderListLoading.value = true
+  try {
+    const result = await request('/api/pay/alipay/page-pay', {
+      method: 'POST',
+      body: JSON.stringify({
+        orderNumber: order.orderNumber,
+        userId: currentUser.value.id
+      })
+    })
+    setNotice('success', `模拟支付成功：${result.data.payNumber}`)
     await loadOrders()
   } catch (error) {
     setNotice('error', error.message)
@@ -721,8 +810,12 @@ onMounted(loadCurrentUser)
               </select>
             </label>
             <label>
-              <span>数量</span>
-              <input v-model.number="orderForm.quantity" type="number" min="1" max="6" />
+              <span>购票人</span>
+              <select v-model="orderForm.ticketUserIds" multiple>
+                <option v-for="ticketUser in ticketUsers" :key="ticketUser.id" :value="String(ticketUser.id)">
+                  {{ ticketUser.relName }} / {{ ticketUser.idNumber }}
+                </option>
+              </select>
             </label>
             <div class="order-total">
               <span>合计</span>
@@ -732,6 +825,7 @@ onMounted(loadCurrentUser)
               {{ orderLoading ? '下单中...' : '下单' }}
             </button>
           </div>
+          <p v-if="ticketUsers.length === 0" class="muted">请先到个人中心添加购票人，再创建订单。</p>
         </article>
 
         <article class="detail-section wide">
@@ -774,6 +868,59 @@ onMounted(loadCurrentUser)
             <dd>{{ currentUser.email || 'Not set' }}</dd>
           </div>
         </dl>
+      </section>
+
+      <section class="order-section">
+        <div class="featured-header">
+          <div>
+            <p class="eyebrow">购票人</p>
+            <h2>我的购票人</h2>
+          </div>
+          <button class="ghost-button" type="button" :disabled="orderListLoading" @click="loadTicketUsers">
+            刷新
+          </button>
+        </div>
+
+        <form class="ticket-user-form" @submit.prevent="createTicketUser">
+          <label>
+            <span>姓名</span>
+            <input v-model.trim="ticketUserForm.relName" required maxlength="256" />
+          </label>
+          <label>
+            <span>证件类型</span>
+            <select v-model.number="ticketUserForm.idType">
+              <option :value="1">身份证</option>
+              <option :value="2">港澳台居民居住证</option>
+              <option :value="3">港澳居民来往内地通行证</option>
+              <option :value="4">台湾居民来往内地通行证</option>
+              <option :value="5">护照</option>
+              <option :value="6">外国人永久居住证</option>
+            </select>
+          </label>
+          <label>
+            <span>证件号码</span>
+            <input v-model.trim="ticketUserForm.idNumber" required maxlength="512" />
+          </label>
+          <button class="primary-button" type="submit" :disabled="orderListLoading">
+            添加购票人
+          </button>
+        </form>
+
+        <div v-if="ticketUsers.length === 0" class="empty-state sheet-state">
+          <strong>暂无购票人</strong>
+          <p>添加购票人后，下单时即可选择。</p>
+        </div>
+        <div v-else class="ticket-user-list">
+          <article v-for="ticketUser in ticketUsers" :key="ticketUser.id" class="ticket-user-card">
+            <div>
+              <strong>{{ ticketUser.relName }}</strong>
+              <p>证件类型 {{ ticketUser.idType }} / {{ ticketUser.idNumber }}</p>
+            </div>
+            <button class="ghost-button" type="button" :disabled="orderListLoading" @click="deleteTicketUser(ticketUser.id)">
+              删除
+            </button>
+          </article>
+        </div>
       </section>
 
       <section class="order-section">
@@ -827,6 +974,14 @@ onMounted(loadCurrentUser)
               </span>
             </div>
             <div class="order-actions">
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="orderListLoading || order.orderStatus !== 1"
+                @click="payOrder(order)"
+              >
+                支付宝支付
+              </button>
               <button
                 class="ghost-button"
                 type="button"

@@ -48,6 +48,14 @@ public class OrderDaoImpl implements OrderDao {
         return orderMapper.selectOrdersByUserId(userId, limit, offset);
     }
 
+    /**
+     * Finds an existing user-program order by delegating to the MyBatis mapper.
+     */
+    @Override
+    public Optional<Order> findExistingUserProgramOrder(Long userId, Long programId, List<Integer> orderStatuses) {
+        return Optional.ofNullable(orderMapper.selectLatestOrderByUserIdAndProgramId(userId, programId, orderStatuses));
+    }
+
     @Override
     public List<OrderTicketUser> listTicketUsers(Long orderNumber) {
         return orderMapper.selectTicketUsersByOrderNumber(orderNumber);
@@ -61,6 +69,16 @@ public class OrderDaoImpl implements OrderDao {
     @Override
     public void cancelTicketUsers(Long orderNumber, Instant now, int canceledStatus) {
         orderMapper.cancelTicketUsersByOrderNumber(orderNumber, now, canceledStatus);
+    }
+
+    @Override
+    public boolean payUnpaidOrder(Long orderNumber, Instant payTime, int unpaidStatus, int paidStatus) {
+        return orderMapper.payUnpaidOrder(orderNumber, payTime, unpaidStatus, paidStatus) > 0;
+    }
+
+    @Override
+    public void payTicketUsers(Long orderNumber, Instant payTime, int paidStatus) {
+        orderMapper.payTicketUsersByOrderNumber(orderNumber, payTime, paidStatus);
     }
 
     @Override

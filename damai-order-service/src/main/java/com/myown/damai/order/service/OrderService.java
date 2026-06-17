@@ -3,16 +3,21 @@ package com.myown.damai.order.service;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.order.dao.OrderDao;
 import com.myown.damai.order.dto.OrderCreateRequest;
+import com.myown.damai.order.dto.OrderPayRequest;
 import com.myown.damai.order.dto.OrderResponse;
 import com.myown.damai.order.dto.OrderTicketUserRequest;
 import com.myown.damai.order.dto.OrderTicketUserResponse;
 import com.myown.damai.order.entity.Order;
 import com.myown.damai.order.entity.OrderStatus;
 import com.myown.damai.order.entity.OrderTicketUser;
+import com.myown.damai.order.lock.OrderLockExecutor;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -22,6 +27,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 /**
@@ -33,9 +39,15 @@ public class OrderService {
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderService.class);
     private static final int MAX_PAGE_SIZE = 100;
     private static final int EXPIRED_SCAN_LIMIT = 200;
+    private static final List<Integer> IDEMPOTENT_ORDER_STATUSES = Arrays.asList(
+            OrderStatus.UNPAID.code(),
+            OrderStatus.PAID.code()
+    );
     private static final AtomicInteger ORDER_SEQUENCE = new AtomicInteger(ThreadLocalRandom.current().nextInt(1000));
 
     private final OrderDao orderDao;
+    private final OrderLockExecutor orderLockExecutor;
+    private final TransactionTemplate transactionTemplate;
     private final Duration orderTimeout;
     private final boolean timeoutScanEnabled;
 
@@ -44,19 +56,56 @@ public class OrderService {
      */
     public OrderService(
             OrderDao orderDao,
+            OrderLockExecutor orderLockExecutor,
+            TransactionTemplate transactionTemplate,
             @Value("${damai.order.timeout-minutes:15}") long timeoutMinutes,
             @Value("${damai.order.timeout-scan-enabled:true}") boolean timeoutScanEnabled
     ) {
         this.orderDao = orderDao;
+        this.orderLockExecutor = orderLockExecutor;
+        this.transactionTemplate = transactionTemplate;
         this.orderTimeout = Duration.ofMinutes(timeoutMinutes);
         this.timeoutScanEnabled = timeoutScanEnabled;
     }
 
     /**
-     * Creates one unpaid order with ticket-user detail rows.
+     * Creates one unpaid order with idempotency and a program-level distributed lock.
      */
-    @Transactional
     public OrderResponse createOrder(OrderCreateRequest request) {
+        Optional<Order> existingOrder = findExistingOrder(request.userId(), request.programId());
+        if (existingOrder.isPresent()) {
+            LOGGER.info(
+                    "order create idempotent hit before lock, userId={}, programId={}, orderNumber={}",
+                    request.userId(),
+                    request.programId(),
+                    existingOrder.get().orderNumber
+            );
+            return buildOrderResponse(existingOrder.get());
+        }
+
+        return orderLockExecutor.executeWithProgramLock(request.programId(), () -> {
+            // Start the database transaction only after the program lock is held, so the lock-protected idempotency check sees latest committed data.
+            OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(request));
+            return Objects.requireNonNull(response, "created order response must not be null");
+        });
+    }
+
+    /**
+     * Creates one order after the distributed lock has been acquired.
+     */
+    private OrderResponse createOrderWithinLock(OrderCreateRequest request) {
+        Optional<Order> existingOrder = findExistingOrder(request.userId(), request.programId());
+        if (existingOrder.isPresent()) {
+            LOGGER.info(
+                    "order create idempotent hit inside lock, userId={}, programId={}, orderNumber={}",
+                    request.userId(),
+                    request.programId(),
+                    existingOrder.get().orderNumber
+            );
+            return buildOrderResponse(existingOrder.get());
+        }
+
+        // TODO: 匹配座位，后续需要根据节目、票档和购票人数量锁定可用座位。
         Instant now = Instant.now();
         Long orderNumber = nextOrderNumber();
         BigDecimal orderPrice = calculateOrderPrice(request.ticketUsers());
@@ -69,6 +118,13 @@ public class OrderService {
         orderDao.saveTicketUsers(ticketUsers);
         LOGGER.info("order created, orderNumber={}, userId={}, orderPrice={}", orderNumber, request.userId(), orderPrice);
         return getOrder(savedOrder.orderNumber);
+    }
+
+    /**
+     * Finds an existing user-program order that should make order creation idempotent.
+     */
+    private Optional<Order> findExistingOrder(Long userId, Long programId) {
+        return orderDao.findExistingUserProgramOrder(userId, programId, IDEMPOTENT_ORDER_STATUSES);
     }
 
     /**
@@ -116,6 +172,35 @@ public class OrderService {
         }
         orderDao.cancelTicketUsers(orderNumber, now, OrderStatus.CANCELED.code());
         LOGGER.info("order canceled, orderNumber={}", orderNumber);
+        return getOrder(orderNumber);
+    }
+
+    /**
+     * Marks one unpaid order as paid after payment provider confirmation.
+     */
+    @Transactional
+    public OrderResponse markOrderPaid(Long orderNumber, OrderPayRequest request) {
+        Order order = findOrderOrThrow(orderNumber);
+        OrderStatus currentStatus = OrderStatus.fromCode(order.orderStatus);
+        if (OrderStatus.PAID.equals(currentStatus)) {
+            LOGGER.info("order pay confirmation ignored because order already paid, orderNumber={}", orderNumber);
+            return getOrder(orderNumber);
+        }
+        if (!OrderStatus.UNPAID.equals(currentStatus)) {
+            LOGGER.warn("order pay confirmation rejected because order is not unpaid, orderNumber={}, status={}", orderNumber, order.orderStatus);
+            throw new BusinessException("ORDER_STATUS_NOT_PAYABLE", "only unpaid orders can be paid", HttpStatus.CONFLICT);
+        }
+        if (request.payAmount().compareTo(order.orderPrice) != 0) {
+            LOGGER.warn("order pay confirmation rejected because amount mismatch, orderNumber={}, orderPrice={}, payAmount={}", orderNumber, order.orderPrice, request.payAmount());
+            throw new BusinessException("ORDER_PAY_AMOUNT_MISMATCH", "pay amount does not match order amount", HttpStatus.CONFLICT);
+        }
+        Instant payTime = request.payTime() == null ? Instant.now() : request.payTime();
+        boolean paid = orderDao.payUnpaidOrder(orderNumber, payTime, OrderStatus.UNPAID.code(), OrderStatus.PAID.code());
+        if (!paid) {
+            throw new BusinessException("ORDER_STATUS_NOT_PAYABLE", "only unpaid orders can be paid", HttpStatus.CONFLICT);
+        }
+        orderDao.payTicketUsers(orderNumber, payTime, OrderStatus.PAID.code());
+        LOGGER.info("order marked paid, orderNumber={}, tradeNumber={}", orderNumber, request.tradeNumber());
         return getOrder(orderNumber);
     }
 

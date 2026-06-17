@@ -29,3 +29,5 @@ damai:
     timeout-minutes: 15
     timeout-scan-enabled: false
     timeout-scan-delay-millis: 600000
+    lock:
+      redisson-enabled: false

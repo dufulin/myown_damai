@@ -158,6 +158,11 @@ select {
   outline: none;
 }
 
+select[multiple] {
+  min-height: 96px;
+  padding: 8px 12px;
+}
+
 input:focus,
 select:focus {
   border-color: #2f8f68;
@@ -549,6 +554,40 @@ dd {
   padding: 22px;
 }
 
+.ticket-user-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(180px, 0.8fr) minmax(220px, 1fr) 140px;
+  gap: 12px;
+  align-items: end;
+}
+
+.ticket-user-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ticket-user-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfb;
+}
+
+.ticket-user-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.ticket-user-card p {
+  margin-bottom: 0;
+  color: #59625c;
+  line-height: 1.5;
+}
+
 .order-card {
   display: grid;
   gap: 14px;
@@ -778,14 +817,16 @@ dd {
   .detail-hero,
   .detail-grid,
   .order-form,
-  .order-meta {
+  .order-meta,
+  .ticket-user-form {
     grid-template-columns: 1fr;
   }
 
   .featured-header,
   .detail-toolbar,
   .order-card-main,
-  .order-actions {
+  .order-actions,
+  .ticket-user-card {
     align-items: stretch;
     flex-direction: column;
   }

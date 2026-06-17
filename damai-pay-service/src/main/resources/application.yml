@@ -1,0 +1,45 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: damai-pay-service
+  datasource:
+    url: ${DAMAI_PAY_DB_URL:${DAMAI_DB_URL:jdbc:mysql://localhost:3306/myown_damai?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
+    username: ${DAMAI_DB_USERNAME:root}
+    password: ${DAMAI_DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  cloud:
+    nacos:
+      username: nacos
+      password: nacos
+      discovery:
+        enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
+        register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+        service: ${spring.application.name}
+        group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+damai:
+  pay:
+    order-service-url: ${DAMAI_ORDER_SERVICE_URL:http://damai-order-service}
+    alipay:
+      enabled: ${DAMAI_ALIPAY_ENABLED:false}
+      gateway-url: ${DAMAI_ALIPAY_GATEWAY_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+      app-id: ${DAMAI_ALIPAY_APP_ID:}
+      merchant-private-key: ${DAMAI_ALIPAY_PRIVATE_KEY:}
+      alipay-public-key: ${DAMAI_ALIPAY_PUBLIC_KEY:}
+      notify-url: ${DAMAI_ALIPAY_NOTIFY_URL:http://localhost:8080/api/pay/alipay/notify}
+      return-url: ${DAMAI_ALIPAY_RETURN_URL:http://localhost:5173}
+      verify-signature: ${DAMAI_ALIPAY_VERIFY_SIGNATURE:false}

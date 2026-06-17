@@ -32,6 +32,11 @@ public interface OrderDao {
     List<Order> listOrdersByUserId(Long userId, int limit, int offset);
 
     /**
+     * Finds an existing payable or paid order for one user and program.
+     */
+    Optional<Order> findExistingUserProgramOrder(Long userId, Long programId, List<Integer> orderStatuses);
+
+    /**
      * Lists ticket-user rows for one order.
      */
     List<OrderTicketUser> listTicketUsers(Long orderNumber);
@@ -45,6 +50,16 @@ public interface OrderDao {
      * Cancels ticket-user rows for one order.
      */
     void cancelTicketUsers(Long orderNumber, Instant now, int canceledStatus);
+
+    /**
+     * Marks one unpaid order as paid.
+     */
+    boolean payUnpaidOrder(Long orderNumber, Instant payTime, int unpaidStatus, int paidStatus);
+
+    /**
+     * Marks ticket-user rows as paid for one order.
+     */
+    void payTicketUsers(Long orderNumber, Instant payTime, int paidStatus);
 
     /**
      * Lists expired unpaid order numbers.

@@ -1,6 +1,8 @@
 package com.myown.damai.user;
 
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -142,5 +144,62 @@ class UserControllerTest {
         mockMvc.perform(get("/api/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    /**
+     * Verifies ticket buyer creation, listing, and soft deletion.
+     */
+    @Test
+    void manageTicketUsers() throws Exception {
+        MvcResult registerResult = mockMvc.perform(post("/api/users/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Dana",
+                                  "mobile": "18800000003",
+                                  "password": "secret123"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String token = objectMapper.readTree(registerResult.getResponse().getContentAsString())
+                .path("data")
+                .path("token")
+                .asText();
+
+        MvcResult ticketUserResult = mockMvc.perform(post("/api/users/ticket-users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "relName": "Dana Buyer",
+                                  "idType": 1,
+                                  "idNumber": "110101199001011234"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.id", notNullValue()))
+                .andExpect(jsonPath("$.data.relName").value("Dana Buyer"))
+                .andReturn();
+        Long ticketUserId = objectMapper.readTree(ticketUserResult.getResponse().getContentAsString())
+                .path("data")
+                .path("id")
+                .asLong();
+
+        mockMvc.perform(get("/api/users/ticket-users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].id").value(ticketUserId));
+
+        mockMvc.perform(delete("/api/users/ticket-users/{ticketUserId}", ticketUserId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mockMvc.perform(get("/api/users/ticket-users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(0)));
     }
 }

@@ -53,6 +53,10 @@ spring:
           uri: lb://damai-order-service
           predicates:
             - Path=/api/orders/**
+        - id: damai-pay-service
+          uri: lb://damai-pay-service
+          predicates:
+            - Path=/api/pay/**
 
 damai:
   gateway:

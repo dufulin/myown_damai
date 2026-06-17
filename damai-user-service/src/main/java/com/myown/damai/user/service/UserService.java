@@ -130,6 +130,16 @@ public class UserService {
         return UserProfileResponse.from(session.getUser());
     }
 
+    /**
+     * Resolves the current logged-in user id from the bearer token.
+     */
+    @Transactional(readOnly = true)
+    public Long currentUserId(String authorizationHeader) {
+        String token = parseBearerToken(authorizationHeader);
+        UserSession session = findActiveSession(token);
+        return session.getUser().getId();
+    }
+
     private AuthResponse createSession(UserAccount user) {
         String token = tokenService.createToken();
         Instant expiresAt = Instant.now().plus(sessionTtl);

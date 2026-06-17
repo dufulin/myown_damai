@@ -3,6 +3,7 @@ package com.myown.damai.order.controller;
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.order.dto.OrderCancelRequest;
 import com.myown.damai.order.dto.OrderCreateRequest;
+import com.myown.damai.order.dto.OrderPayRequest;
 import com.myown.damai.order.dto.OrderResponse;
 import com.myown.damai.order.dto.OrderTimeoutCancelResponse;
 import com.myown.damai.order.service.OrderService;
@@ -86,6 +87,20 @@ public class OrderController {
         LOGGER.info("order cancel request received, orderNumber={}, hasReason={}", orderNumber, request != null && request.reason() != null);
         OrderResponse response = orderService.cancelOrder(orderNumber);
         LOGGER.info("order cancel request succeeded, orderNumber={}", orderNumber);
+        return ApiResponse.success(response);
+    }
+
+    /**
+     * Marks one order as paid after payment confirmation.
+     */
+    @PostMapping("/{orderNumber}/paid")
+    public ApiResponse<OrderResponse> markOrderPaid(
+            @PathVariable Long orderNumber,
+            @Valid @RequestBody OrderPayRequest request
+    ) {
+        LOGGER.info("order paid request received, orderNumber={}, tradeNumber={}", orderNumber, request.tradeNumber());
+        OrderResponse response = orderService.markOrderPaid(orderNumber, request);
+        LOGGER.info("order paid request succeeded, orderNumber={}", orderNumber);
         return ApiResponse.success(response);
     }
 

@@ -38,6 +38,15 @@ public interface OrderMapper {
     );
 
     /**
+     * Selects the latest non-terminal order for one user and one program.
+     */
+    Order selectLatestOrderByUserIdAndProgramId(
+            @Param("userId") Long userId,
+            @Param("programId") Long programId,
+            @Param("orderStatuses") List<Integer> orderStatuses
+    );
+
+    /**
      * Lists ticket-user rows for one order.
      */
     List<OrderTicketUser> selectTicketUsersByOrderNumber(@Param("orderNumber") Long orderNumber);
@@ -59,6 +68,25 @@ public interface OrderMapper {
             @Param("orderNumber") Long orderNumber,
             @Param("now") Instant now,
             @Param("canceledStatus") int canceledStatus
+    );
+
+    /**
+     * Marks one unpaid order as paid.
+     */
+    int payUnpaidOrder(
+            @Param("orderNumber") Long orderNumber,
+            @Param("payTime") Instant payTime,
+            @Param("unpaidStatus") int unpaidStatus,
+            @Param("paidStatus") int paidStatus
+    );
+
+    /**
+     * Marks ticket-user rows as paid for one order.
+     */
+    int payTicketUsersByOrderNumber(
+            @Param("orderNumber") Long orderNumber,
+            @Param("payTime") Instant payTime,
+            @Param("paidStatus") int paidStatus
     );
 
     /**

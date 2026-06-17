@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.pay.mapper.PayBillMapper">
+
+    <resultMap id="PayBillResultMap" type="com.myown.damai.pay.entity.PayBill">
+        <id property="id" column="id"/>
+        <result property="payNumber" column="pay_number"/>
+        <result property="outOrderNo" column="out_order_no"/>
+        <result property="payChannel" column="pay_channel"/>
+        <result property="payScene" column="pay_scene"/>
+        <result property="subject" column="subject"/>
+        <result property="tradeNumber" column="trade_number"/>
+        <result property="payAmount" column="pay_amount"/>
+        <result property="payBillType" column="pay_bill_type"/>
+        <result property="payBillStatus" column="pay_bill_status"/>
+        <result property="payTime" column="pay_time"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="PayBillColumns">
+        id, pay_number, out_order_no, pay_channel, pay_scene, subject, trade_number,
+        pay_amount, pay_bill_type, pay_bill_status, pay_time, create_time, edit_time, status
+    </sql>
+
+    <insert id="insert" parameterType="com.myown.damai.pay.entity.PayBill"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_pay_bill
+            (pay_number, out_order_no, pay_channel, pay_scene, subject, trade_number,
+             pay_amount, pay_bill_type, pay_bill_status, pay_time, create_time, edit_time, status)
+        VALUES
+            (#{payNumber}, #{outOrderNo}, #{payChannel}, #{payScene}, #{subject}, #{tradeNumber},
+             #{payAmount}, #{payBillType}, #{payBillStatus}, #{payTime}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectByOutOrderNo" resultMap="PayBillResultMap">
+        SELECT <include refid="PayBillColumns"/>
+        FROM d_pay_bill
+        WHERE out_order_no = #{outOrderNo}
+          AND status = 1
+    </select>
+
+    <update id="markPaid">
+        UPDATE d_pay_bill
+        SET pay_bill_status = #{paidStatus},
+            trade_number = #{tradeNumber},
+            pay_amount = #{payAmount},
+            pay_time = #{payTime},
+            edit_time = #{payTime}
+        WHERE out_order_no = #{outOrderNo}
+          AND status = 1
+    </update>
+</mapper>

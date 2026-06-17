@@ -15,7 +15,7 @@ spring:
         enabled: false
       host: ${DAMAI_REDIS_HOST:localhost}
       port: ${DAMAI_REDIS_PORT:6379}
-      password: ${DAMAI_REDIS_PASSWORD:123}
+      password: ${DAMAI_REDIS_PASSWORD:}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: 2s
   cloud:

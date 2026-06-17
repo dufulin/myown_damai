@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.user.mapper.TicketUserMapper">
+
+    <resultMap id="TicketUserResultMap" type="com.myown.damai.user.entity.TicketUser">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="relName" column="rel_name"/>
+        <result property="idType" column="id_type"/>
+        <result property="idNumber" column="id_number"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="TicketUserColumns">
+        id,
+        user_id,
+        rel_name,
+        id_type,
+        id_number,
+        create_time,
+        edit_time,
+        status
+    </sql>
+
+    <select id="selectActiveByUserId" resultMap="TicketUserResultMap">
+        SELECT <include refid="TicketUserColumns"/>
+        FROM d_ticket_user
+        WHERE user_id = #{userId}
+          AND status = 1
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+    <select id="selectActiveByIdAndUserId" resultMap="TicketUserResultMap">
+        SELECT <include refid="TicketUserColumns"/>
+        FROM d_ticket_user
+        WHERE id = #{id}
+          AND user_id = #{userId}
+          AND status = 1
+    </select>
+
+    <insert id="insert" parameterType="com.myown.damai.user.entity.TicketUser"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_ticket_user
+            (user_id, rel_name, id_type, id_number, create_time, edit_time, status)
+        VALUES
+            (#{userId}, #{relName}, #{idType}, #{idNumber}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <update id="softDeleteByIdAndUserId">
+        UPDATE d_ticket_user
+        SET status = 0,
+            edit_time = #{now}
+        WHERE id = #{id}
+          AND user_id = #{userId}
+          AND status = 1
+    </update>
+</mapper>

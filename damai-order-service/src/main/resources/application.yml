@@ -9,6 +9,13 @@ spring:
     username: ${DAMAI_DB_USERNAME:root}
     password: ${DAMAI_DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${DAMAI_REDIS_HOST:localhost}
+      port: ${DAMAI_REDIS_PORT:6379}
+      password: ${DAMAI_REDIS_PASSWORD:}
+      database: ${DAMAI_REDIS_DATABASE:0}
+      timeout: 2s
   cloud:
     nacos:
       username: nacos
@@ -36,3 +43,7 @@ damai:
     timeout-minutes: 15
     timeout-scan-enabled: true
     timeout-scan-delay-millis: 60000
+    lock:
+      redisson-enabled: true
+      wait-seconds: 3
+      lease-seconds: 10
