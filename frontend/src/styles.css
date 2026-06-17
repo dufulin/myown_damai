@@ -296,7 +296,7 @@ dd {
 
 .search-band {
   display: grid;
-  grid-template-columns: minmax(240px, 0.9fr) minmax(300px, 1.1fr);
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1.55fr);
   gap: 20px;
   align-items: end;
   padding: 22px;
@@ -304,8 +304,13 @@ dd {
 
 .search-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-columns: repeat(4, minmax(128px, 1fr)) 112px;
   gap: 10px;
+  align-items: end;
+}
+
+.search-field.wide {
+  grid-column: span 2;
 }
 
 .menu-grid {
@@ -837,6 +842,10 @@ dd {
 
   .search-row {
     grid-template-columns: 1fr;
+  }
+
+  .search-field.wide {
+    grid-column: auto;
   }
 
   .sheet-backdrop {

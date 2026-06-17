@@ -4,6 +4,7 @@ import com.myown.damai.program.entity.Program;
 import com.myown.damai.program.entity.ProgramCategory;
 import com.myown.damai.program.entity.ProgramGroup;
 import com.myown.damai.program.entity.ProgramShowTime;
+import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
 import java.util.List;
@@ -56,6 +57,16 @@ public interface ProgramMapper {
             @Param("limit") int limit,
             @Param("offset") int offset
     );
+
+    /**
+     * Lists ids of normal programs.
+     */
+    List<Long> selectNormalProgramIds();
+
+    /**
+     * Lists minimum and maximum ticket prices for normal programs.
+     */
+    List<ProgramTicketPriceRange> selectTicketPriceRanges();
 
     /**
      * Inserts one show time.

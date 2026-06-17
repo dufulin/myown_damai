@@ -93,6 +93,44 @@ public class ProgramController {
     }
 
     /**
+     * Searches programs with Elasticsearch smart filters.
+     */
+    @GetMapping("/search")
+    public ApiResponse<List<ProgramResponse>> searchPrograms(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "areaId", required = false) Long areaId,
+            @RequestParam(value = "programCategoryId", required = false) Long programCategoryId,
+            @RequestParam(value = "timeType", defaultValue = "0") Integer timeType,
+            @RequestParam(value = "startDateTime", required = false) String startDateTime,
+            @RequestParam(value = "endDateTime", required = false) String endDateTime,
+            @RequestParam(value = "type", defaultValue = "1") Integer type,
+            @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
+            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize
+    ) {
+        LOGGER.info(
+                "program search request received, keyword={}, areaId={}, programCategoryId={}, timeType={}, type={}",
+                keyword,
+                areaId,
+                programCategoryId,
+                timeType,
+                type
+        );
+        List<ProgramResponse> programs = programService.searchPrograms(
+                keyword,
+                areaId,
+                programCategoryId,
+                timeType,
+                startDateTime,
+                endDateTime,
+                type,
+                pageNumber,
+                pageSize
+        );
+        LOGGER.info("program search request succeeded, count={}", programs.size());
+        return ApiResponse.success(programs);
+    }
+
+    /**
      * Gets one program detail.
      */
     @GetMapping("/{programId}")

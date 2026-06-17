@@ -18,16 +18,26 @@ import com.myown.damai.program.entity.Program;
 import com.myown.damai.program.entity.ProgramCategory;
 import com.myown.damai.program.entity.ProgramGroup;
 import com.myown.damai.program.entity.ProgramShowTime;
+import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
+import com.myown.damai.program.search.ProgramBloomFilter;
+import com.myown.damai.program.search.ProgramSearchGateway;
+import com.myown.damai.program.search.ProgramSearchDocument;
+import com.myown.damai.program.dto.ProgramSearchRequest;
 import com.myown.damai.common.exception.BusinessException;
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.TextStyle;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +61,8 @@ public class ProgramService {
     private static final int MAX_SEAT_BATCH_SIZE = 5000;
 
     private final ProgramDao programDao;
+    private final ProgramSearchGateway programSearchGateway;
+    private final ProgramBloomFilter programBloomFilter;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final boolean redisEnabled;
@@ -59,6 +71,8 @@ public class ProgramService {
 
     public ProgramService(
             ProgramDao programDao,
+            ProgramSearchGateway programSearchGateway,
+            ProgramBloomFilter programBloomFilter,
             StringRedisTemplate redisTemplate,
             ObjectMapper objectMapper,
             @Value("${damai.cache.redis-enabled:true}") boolean redisEnabled,
@@ -66,6 +80,8 @@ public class ProgramService {
             @Value("${damai.cache.program-detail-ttl-hours:2}") long programDetailTtlHours
     ) {
         this.programDao = programDao;
+        this.programSearchGateway = programSearchGateway;
+        this.programBloomFilter = programBloomFilter;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.redisEnabled = redisEnabled;
@@ -126,6 +142,8 @@ public class ProgramService {
         LOGGER.info("program created, programId={}, title={}", savedProgram.id, savedProgram.title);
         ProgramDetailResponse response = ProgramDetailResponse.of(savedProgram, showTimes, ticketCategories);
         putProgramDetailCache(savedProgram.id, response);
+        programBloomFilter.add(savedProgram.id);
+        programSearchGateway.saveProgramDetail(buildSearchDocument(savedProgram.id, response, calculatePriceRange(ticketCategories)));
         return response;
     }
 
@@ -145,10 +163,58 @@ public class ProgramService {
     }
 
     /**
+     * Searches normal programs with Elasticsearch-first smart filtering and sorting.
+     */
+    @Transactional(readOnly = true)
+    public List<ProgramResponse> searchPrograms(
+            String keyword,
+            Long areaId,
+            Long programCategoryId,
+            Integer timeType,
+            String startDateTime,
+            String endDateTime,
+            Integer type,
+            int pageNumber,
+            int pageSize
+    ) {
+        int normalizedPageNumber = Math.max(pageNumber, 1);
+        int normalizedPageSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        ProgramSearchRequest request = new ProgramSearchRequest(
+                StringUtils.hasText(keyword) ? keyword.trim() : null,
+                areaId,
+                programCategoryId,
+                normalizeSearchType(timeType, 0),
+                resolveStartTime(timeType, startDateTime),
+                resolveEndTime(timeType, endDateTime),
+                normalizeSearchType(type, 1),
+                normalizedPageNumber,
+                normalizedPageSize
+        );
+        Optional<List<ProgramResponse>> esPrograms = programSearchGateway.searchPrograms(request);
+        if (esPrograms.isPresent()) {
+            LOGGER.info("program es search succeeded, count={}", esPrograms.get().size());
+            return esPrograms.get();
+        }
+        LOGGER.warn("program es search unavailable, fallback to mysql list, keyword={}, areaId={}, programCategoryId={}", keyword, areaId, programCategoryId);
+        return listPrograms(keyword, programCategoryId, areaId, normalizedPageNumber, normalizedPageSize);
+    }
+
+    /**
      * Gets one program detail.
      */
     @Transactional(readOnly = true)
     public ProgramDetailResponse getProgramDetail(Long programId) {
+        if (programBloomFilter.isInitialized() && !programBloomFilter.mightContain(programId)) {
+            LOGGER.info("program detail bloom filter rejected, programId={}", programId);
+            throw new BusinessException("PROGRAM_NOT_FOUND", "program not found", HttpStatus.NOT_FOUND);
+        }
+
+        Optional<ProgramDetailResponse> esDetail = programSearchGateway.findProgramDetail(programId);
+        if (esDetail.isPresent()) {
+            putProgramDetailCache(programId, esDetail.get());
+            return esDetail.get();
+        }
+
         Optional<String> cachedValue = getCache(programDetailKey(programId));
         if (cachedValue.isPresent()) {
             String value = cachedValue.get();
@@ -164,10 +230,46 @@ public class ProgramService {
         }
 
         LOGGER.info("program detail cache miss, programId={}", programId);
+        ProgramDetailResponse response = loadProgramDetailFromDatabase(programId, true);
+        putProgramDetailCache(programId, response);
+        programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, calculatePriceRange(response.ticketCategories())));
+        return response;
+    }
+
+    /**
+     * Synchronizes all current database program details into the search index.
+     */
+    @Transactional(readOnly = true)
+    public void syncProgramDetailsToSearchIndex() {
+        List<Long> programIds = programDao.listNormalProgramIds();
+        programBloomFilter.rebuild(programIds);
+        boolean createdIndex = programSearchGateway.createProgramDetailIndexIfAbsent();
+        if (!createdIndex) {
+            LOGGER.info("program detail es startup sync skipped because index already exists or search is unavailable");
+            return;
+        }
+        Map<Long, ProgramTicketPriceRange> priceRangeMap = programDao.listTicketPriceRanges()
+                .stream()
+                .collect(Collectors.toMap(range -> range.programId, Function.identity()));
+        int successCount = 0;
+        for (Long programId : programIds) {
+            ProgramDetailResponse response = loadProgramDetailFromDatabase(programId, false);
+            programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, priceRangeMap.get(programId)));
+            successCount++;
+        }
+        LOGGER.info("program detail es startup sync finished, count={}", successCount);
+    }
+
+    /**
+     * Loads one program detail from MySQL and optionally writes a null marker for missing ids.
+     */
+    private ProgramDetailResponse loadProgramDetailFromDatabase(Long programId, boolean cacheNullMarker) {
         Program program = programDao.findProgramById(programId)
                 .orElseThrow(() -> {
-                    // Cache a short-lived null marker so repeated invalid ids do not keep hitting MySQL.
-                    putCache(programDetailKey(programId), NULL_VALUE, nullTtl);
+                    if (cacheNullMarker) {
+                        // Cache a short-lived null marker so repeated invalid ids do not keep hitting MySQL.
+                        putCache(programDetailKey(programId), NULL_VALUE, nullTtl);
+                    }
                     return new BusinessException("PROGRAM_NOT_FOUND", "program not found", HttpStatus.NOT_FOUND);
                 });
         List<ProgramShowTimeResponse> showTimes = programDao.listShowTimes(programId)
@@ -178,9 +280,105 @@ public class ProgramService {
                 .stream()
                 .map(TicketCategoryResponse::from)
                 .toList();
-        ProgramDetailResponse response = ProgramDetailResponse.of(program, showTimes, ticketCategories);
-        putProgramDetailCache(programId, response);
-        return response;
+        return ProgramDetailResponse.of(program, showTimes, ticketCategories);
+    }
+
+    /**
+     * Builds the search document with program detail and ticket price range.
+     */
+    private ProgramSearchDocument buildSearchDocument(
+            Long programId,
+            ProgramDetailResponse response,
+            ProgramTicketPriceRange priceRange
+    ) {
+        BigDecimal minTicketPrice = priceRange == null ? null : priceRange.minPrice;
+        BigDecimal maxTicketPrice = priceRange == null ? null : priceRange.maxPrice;
+        return ProgramSearchDocument.of(programId, minTicketPrice, maxTicketPrice, response);
+    }
+
+    /**
+     * Normalizes optional integer search options.
+     */
+    private int normalizeSearchType(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    /**
+     * Resolves the inclusive search start time from a time type.
+     */
+    private Instant resolveStartTime(Integer timeType, String startDateTime) {
+        int normalizedTimeType = normalizeSearchType(timeType, 0);
+        LocalDate today = LocalDate.now(DEFAULT_ZONE);
+        if (normalizedTimeType == 0) {
+            return null;
+        }
+        if (normalizedTimeType == 1 || normalizedTimeType == 3 || normalizedTimeType == 4) {
+            return today.atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 2) {
+            return today.plusDays(1).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 5) {
+            return parseRequiredDate(startDateTime, "startDateTime").atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        throw new BusinessException("PROGRAM_SEARCH_TIME_TYPE_INVALID", "timeType is invalid", HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Resolves the exclusive search end time from a time type.
+     */
+    private Instant resolveEndTime(Integer timeType, String endDateTime) {
+        int normalizedTimeType = normalizeSearchType(timeType, 0);
+        LocalDate today = LocalDate.now(DEFAULT_ZONE);
+        if (normalizedTimeType == 0) {
+            return null;
+        }
+        if (normalizedTimeType == 1) {
+            return today.plusDays(1).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 2) {
+            return today.plusDays(2).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 3) {
+            return today.plusWeeks(1).plusDays(1).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 4) {
+            return today.plusMonths(1).plusDays(1).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        if (normalizedTimeType == 5) {
+            return parseRequiredDate(endDateTime, "endDateTime").plusDays(1).atStartOfDay(DEFAULT_ZONE).toInstant();
+        }
+        throw new BusinessException("PROGRAM_SEARCH_TIME_TYPE_INVALID", "timeType is invalid", HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Parses a required ISO local date string.
+     */
+    private LocalDate parseRequiredDate(String value, String fieldName) {
+        if (!StringUtils.hasText(value)) {
+            throw new BusinessException("PROGRAM_SEARCH_DATE_REQUIRED", fieldName + " is required", HttpStatus.BAD_REQUEST);
+        }
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (RuntimeException exception) {
+            throw new BusinessException("PROGRAM_SEARCH_DATE_INVALID", fieldName + " must use yyyy-MM-dd", HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    /**
+     * Calculates the ticket price range from in-memory ticket category responses.
+     */
+    private ProgramTicketPriceRange calculatePriceRange(List<TicketCategoryResponse> ticketCategories) {
+        ProgramTicketPriceRange priceRange = new ProgramTicketPriceRange();
+        priceRange.minPrice = ticketCategories.stream()
+                .map(TicketCategoryResponse::price)
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+        priceRange.maxPrice = ticketCategories.stream()
+                .map(TicketCategoryResponse::price)
+                .max(Comparator.naturalOrder())
+                .orElse(null);
+        return priceRange;
     }
 
     /**

@@ -4,6 +4,7 @@ import com.myown.damai.program.entity.Program;
 import com.myown.damai.program.entity.ProgramCategory;
 import com.myown.damai.program.entity.ProgramGroup;
 import com.myown.damai.program.entity.ProgramShowTime;
+import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
 import com.myown.damai.program.mapper.ProgramMapper;
@@ -63,6 +64,22 @@ public class ProgramDaoImpl implements ProgramDao {
     @Override
     public List<Program> listPrograms(String keyword, Long categoryId, Long areaId, int limit, int offset) {
         return programMapper.selectPrograms(keyword, categoryId, areaId, limit, offset);
+    }
+
+    /**
+     * Lists all normal program ids by delegating to the MyBatis mapper.
+     */
+    @Override
+    public List<Long> listNormalProgramIds() {
+        return programMapper.selectNormalProgramIds();
+    }
+
+    /**
+     * Lists ticket price ranges by delegating to the MyBatis mapper.
+     */
+    @Override
+    public List<ProgramTicketPriceRange> listTicketPriceRanges() {
+        return programMapper.selectTicketPriceRanges();
     }
 
     @Override

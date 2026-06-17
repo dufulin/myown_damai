@@ -4,6 +4,7 @@ import com.myown.damai.program.entity.Program;
 import com.myown.damai.program.entity.ProgramCategory;
 import com.myown.damai.program.entity.ProgramGroup;
 import com.myown.damai.program.entity.ProgramShowTime;
+import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
 import java.util.List;
@@ -48,6 +49,16 @@ public interface ProgramDao {
      * Lists normal programs.
      */
     List<Program> listPrograms(String keyword, Long categoryId, Long areaId, int limit, int offset);
+
+    /**
+     * Lists all normal program ids for search index initialization.
+     */
+    List<Long> listNormalProgramIds();
+
+    /**
+     * Lists ticket price ranges for all normal programs.
+     */
+    List<ProgramTicketPriceRange> listTicketPriceRanges();
 
     /**
      * Saves one show time.

@@ -31,3 +31,6 @@ mybatis:
 damai:
   cache:
     redis-enabled: false
+  search:
+    es-enabled: false
+    startup-sync-enabled: false

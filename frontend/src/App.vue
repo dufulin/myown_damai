@@ -34,6 +34,15 @@ const activeFilter = reactive({
   keyword: ''
 })
 
+const searchFilters = reactive({
+  areaId: '',
+  programCategoryId: '',
+  timeType: 0,
+  startDateTime: '',
+  endDateTime: '',
+  type: 1
+})
+
 const form = reactive({
   login: '',
   password: '',
@@ -72,6 +81,22 @@ const fallbackCategories = [
   { id: null, name: 'Family', parentId: 0, type: 1, keyword: 'Family' }
 ]
 
+const timeOptions = [
+  { value: 0, label: '全部时间' },
+  { value: 1, label: '今天' },
+  { value: 2, label: '明天' },
+  { value: 3, label: '一周内' },
+  { value: 4, label: '一个月内' },
+  { value: 5, label: '按日历' }
+]
+
+const sortOptions = [
+  { value: 1, label: '相关度排序' },
+  { value: 2, label: '推荐排序' },
+  { value: 3, label: '最近开场' },
+  { value: 4, label: '最新上架' }
+]
+
 const isLoggedIn = computed(() => Boolean(token.value && currentUser.value))
 const title = computed(() => (mode.value === 'login' ? 'Login' : 'Register'))
 const hasNextPage = computed(() => programs.value.length === pageSize)
@@ -89,6 +114,11 @@ const canCreateOrder = computed(() => Boolean(selectedProgram.value && selectedS
 const visibleCategories = computed(() => {
   const parents = programCategories.value.filter((category) => category.parentId === 0 || category.type === 1)
   return parents.length > 0 ? [{ id: null, name: 'All Types', keyword: '' }, ...parents] : fallbackCategories
+})
+const categorySearchOptions = computed(() => {
+  const children = programCategories.value.filter((category) => category.id && category.parentId !== 0)
+  const source = children.length > 0 ? children : programCategories.value.filter((category) => category.id)
+  return [{ id: '', name: '全部类型' }, ...source]
 })
 const noticeItems = computed(() => {
   const notices = selectedProgramDetail.value?.notices || {}
@@ -322,6 +352,9 @@ async function openTypePrograms(category) {
   activeFilter.categoryId = category.id
   activeFilter.areaId = null
   activeFilter.keyword = category.id ? '' : (category.keyword || '')
+  searchFilters.programCategoryId = category.id ? String(category.id) : ''
+  searchFilters.areaId = ''
+  searchKeyword.value = activeFilter.keyword
   programSheetOpen.value = true
   await loadPrograms()
 }
@@ -335,6 +368,9 @@ async function openAreaPrograms(area) {
   activeFilter.categoryId = null
   activeFilter.areaId = area.id
   activeFilter.keyword = ''
+  searchFilters.areaId = area.id ? String(area.id) : ''
+  searchFilters.programCategoryId = ''
+  searchKeyword.value = ''
   programSheetOpen.value = true
   await loadPrograms()
 }
@@ -346,32 +382,58 @@ async function searchPrograms() {
   const keyword = searchKeyword.value.trim()
   pageNumber.value = 1
   activeFilter.label = keyword ? `Search: ${keyword}` : 'All Programs'
-  activeFilter.categoryId = null
-  activeFilter.areaId = null
+  activeFilter.categoryId = searchFilters.programCategoryId ? Number(searchFilters.programCategoryId) : null
+  activeFilter.areaId = searchFilters.areaId ? Number(searchFilters.areaId) : null
   activeFilter.keyword = keyword
   programSheetOpen.value = true
   await loadPrograms()
 }
 
 /**
+ * Appends one optional query parameter when its value is present.
+ */
+function appendOptionalParam(params, key, value) {
+  if (value !== null && value !== undefined && value !== '') {
+    params.set(key, String(value))
+  }
+}
+
+/**
+ * Validates calendar search fields before sending the search request.
+ */
+function validateCalendarSearch() {
+  if (Number(searchFilters.timeType) !== 5) {
+    return true
+  }
+  if (!searchFilters.startDateTime || !searchFilters.endDateTime) {
+    setNotice('error', '按日历搜索时，请选择开始和结束日期。')
+    return false
+  }
+  return true
+}
+
+/**
  * Loads one page of programs from the backend.
  */
 async function loadPrograms() {
+  if (!validateCalendarSearch()) {
+    return
+  }
   programLoading.value = true
   try {
     const params = new URLSearchParams()
     params.set('pageNumber', String(pageNumber.value))
     params.set('pageSize', String(pageSize))
-    if (activeFilter.keyword) {
-      params.set('keyword', activeFilter.keyword)
+    params.set('timeType', String(searchFilters.timeType))
+    params.set('type', String(searchFilters.type))
+    appendOptionalParam(params, 'keyword', activeFilter.keyword)
+    appendOptionalParam(params, 'programCategoryId', searchFilters.programCategoryId)
+    appendOptionalParam(params, 'areaId', searchFilters.areaId)
+    if (Number(searchFilters.timeType) === 5) {
+      params.set('startDateTime', searchFilters.startDateTime)
+      params.set('endDateTime', searchFilters.endDateTime)
     }
-    if (activeFilter.categoryId) {
-      params.set('categoryId', String(activeFilter.categoryId))
-    }
-    if (activeFilter.areaId) {
-      params.set('areaId', String(activeFilter.areaId))
-    }
-    const result = await request(`/api/programs?${params.toString()}`)
+    const result = await request(`/api/programs/search?${params.toString()}`)
     programs.value = result.data || []
   } catch (error) {
     programs.value = []
@@ -1013,7 +1075,50 @@ onMounted(loadCurrentUser)
           <h2>Search by keyword, type, or area</h2>
         </div>
         <form class="search-row" @submit.prevent="searchPrograms">
-          <input v-model.trim="searchKeyword" placeholder="Program name, artist, or keyword" maxlength="80" />
+          <label class="search-field wide">
+            <span>关键词</span>
+            <input v-model.trim="searchKeyword" placeholder="节目名、艺人、场馆" maxlength="80" />
+          </label>
+          <label class="search-field">
+            <span>城市</span>
+            <select v-model="searchFilters.areaId">
+              <option v-for="area in areaOptions" :key="`search-area-${area.id || area.label}`" :value="area.id ? String(area.id) : ''">
+                {{ area.label === 'All Areas' ? '全部城市' : area.label }}
+              </option>
+            </select>
+          </label>
+          <label class="search-field">
+            <span>节目类型</span>
+            <select v-model="searchFilters.programCategoryId">
+              <option v-for="category in categorySearchOptions" :key="`search-category-${category.id || category.name}`" :value="category.id ? String(category.id) : ''">
+                {{ category.name }}
+              </option>
+            </select>
+          </label>
+          <label class="search-field">
+            <span>时间</span>
+            <select v-model.number="searchFilters.timeType">
+              <option v-for="item in timeOptions" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
+          <label v-if="Number(searchFilters.timeType) === 5" class="search-field">
+            <span>开始日期</span>
+            <input v-model="searchFilters.startDateTime" type="date" />
+          </label>
+          <label v-if="Number(searchFilters.timeType) === 5" class="search-field">
+            <span>结束日期</span>
+            <input v-model="searchFilters.endDateTime" type="date" />
+          </label>
+          <label class="search-field">
+            <span>排序</span>
+            <select v-model.number="searchFilters.type">
+              <option v-for="item in sortOptions" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select>
+          </label>
           <button class="primary-button" type="submit" :disabled="programLoading">
             Search
           </button>

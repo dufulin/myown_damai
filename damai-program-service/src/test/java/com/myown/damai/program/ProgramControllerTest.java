@@ -91,6 +91,16 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].id").value(programId));
 
+        mockMvc.perform(get("/api/programs/search")
+                        .param("keyword", "Demo")
+                        .param("programCategoryId", String.valueOf(categoryId))
+                        .param("areaId", "110000")
+                        .param("timeType", "0")
+                        .param("type", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].id").value(programId));
+
         mockMvc.perform(get("/api/programs/{programId}", programId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.program.id").value(programId))

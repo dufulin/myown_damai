@@ -102,6 +102,12 @@
         <result property="status" column="status"/>
     </resultMap>
 
+    <resultMap id="ProgramTicketPriceRangeResultMap" type="com.myown.damai.program.entity.ProgramTicketPriceRange">
+        <id property="programId" column="program_id"/>
+        <result property="minPrice" column="min_price"/>
+        <result property="maxPrice" column="max_price"/>
+    </resultMap>
+
     <sql id="ProgramColumns">
         id, program_group_id, prime, area_id, program_category_id, parent_program_category_id,
         title, actor, place, item_picture, pre_sell, pre_sell_instruction, important_notice,
@@ -201,6 +207,26 @@
         </if>
         ORDER BY high_heat DESC, issue_time DESC, id DESC
         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectNormalProgramIds" resultType="java.lang.Long">
+        SELECT id
+        FROM d_program
+        WHERE status = 1
+          AND program_status = 1
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectTicketPriceRanges" resultMap="ProgramTicketPriceRangeResultMap">
+        SELECT tc.program_id,
+               MIN(tc.price) AS min_price,
+               MAX(tc.price) AS max_price
+        FROM d_ticket_category tc
+        INNER JOIN d_program p ON p.id = tc.program_id
+        WHERE tc.status = 1
+          AND p.status = 1
+          AND p.program_status = 1
+        GROUP BY tc.program_id
     </select>
 
     <insert id="insertShowTime" parameterType="com.myown.damai.program.entity.ProgramShowTime"

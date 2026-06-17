@@ -45,3 +45,15 @@ damai:
     redis-enabled: true
     null-ttl-minutes: 5
     program-detail-ttl-hours: 2
+  search:
+    es-enabled: true
+    startup-sync-enabled: true
+    uri: ${DAMAI_ES_URI:http://localhost:9200}
+    username: ${DAMAI_ES_USERNAME:}
+    password: ${DAMAI_ES_PASSWORD:}
+    index-name: ${DAMAI_ES_PROGRAM_INDEX:damai_program_detail}
+    connect-timeout-seconds: 2
+    request-timeout-seconds: 5
+    bloom:
+      bit-size: 1048576
+      hash-count: 5
