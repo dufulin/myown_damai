@@ -8,6 +8,7 @@ import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
 import com.myown.damai.program.mapper.ProgramMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -121,5 +122,29 @@ public class ProgramDaoImpl implements ProgramDao {
     @Override
     public List<Seat> listSeats(Long programId) {
         return programMapper.selectSeatsByProgramId(programId);
+    }
+
+    /**
+     * Decreases remaining stock for one ticket category using an atomic SQL predicate.
+     */
+    @Override
+    public boolean decreaseTicketCategoryRemain(Long programId, Long ticketCategoryId, long quantity) {
+        return programMapper.decreaseTicketCategoryRemain(programId, ticketCategoryId, quantity, Instant.now()) > 0;
+    }
+
+    /**
+     * Increases remaining stock for one ticket category using an atomic SQL update.
+     */
+    @Override
+    public boolean increaseTicketCategoryRemain(Long programId, Long ticketCategoryId, long quantity) {
+        return programMapper.increaseTicketCategoryRemain(programId, ticketCategoryId, quantity, Instant.now()) > 0;
+    }
+
+    /**
+     * Updates one seat status using an expected-status guard.
+     */
+    @Override
+    public boolean updateSeatSellStatus(Long programId, Long ticketCategoryId, Long seatId, int fromStatus, int toStatus) {
+        return programMapper.updateSeatSellStatus(programId, ticketCategoryId, seatId, fromStatus, toStatus, Instant.now()) > 0;
     }
 }

@@ -16,6 +16,20 @@ spring:
       password: ${DAMAI_REDIS_PASSWORD:}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: 2s
+  kafka:
+    bootstrap-servers: ${DAMAI_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 10000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 12000
+    consumer:
+      group-id: ${DAMAI_ORDER_KAFKA_GROUP_ID:damai-order-service}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
   cloud:
     nacos:
       username: nacos
@@ -39,10 +53,18 @@ mybatis:
     map-underscore-to-camel-case: true
 
 damai:
+  program-service:
+    base-url: ${DAMAI_PROGRAM_SERVICE_BASE_URL:http://localhost:8082}
   order:
     timeout-minutes: 15
     timeout-scan-enabled: true
     timeout-scan-delay-millis: 60000
+    async:
+      enabled: true
+      create-topic: ${DAMAI_ORDER_CREATE_TOPIC:damai-order-create}
+      send-timeout-seconds: ${DAMAI_ORDER_KAFKA_SEND_TIMEOUT_SECONDS:10}
+    inventory:
+      enabled: ${DAMAI_ORDER_INVENTORY_ENABLED:true}
     lock:
       redisson-enabled: true
       wait-seconds: 3

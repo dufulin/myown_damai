@@ -123,9 +123,42 @@ class ProgramControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data", hasSize(6)));
 
+        MvcResult seatListResult = mockMvc.perform(get("/api/programs/{programId}/seats", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(6)))
+                .andReturn();
+
+        JsonNode seatListJson = objectMapper.readTree(seatListResult.getResponse().getContentAsString());
+        Long firstSeatId = seatListJson.path("data").get(0).path("id").asLong();
+        Long secondSeatId = seatListJson.path("data").get(1).path("id").asLong();
+
+        lockInventory(programId, ticketCategoryId, firstSeatId, secondSeatId, 90001L);
+        mockMvc.perform(get("/api/programs/{programId}", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ticketCategories[0].remainNumber").value(18));
         mockMvc.perform(get("/api/programs/{programId}/seats", programId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data", hasSize(6)));
+                .andExpect(jsonPath("$.data[0].sellStatus").value(2))
+                .andExpect(jsonPath("$.data[1].sellStatus").value(2));
+
+        releaseInventory(programId, ticketCategoryId, firstSeatId, secondSeatId, 90001L);
+        mockMvc.perform(get("/api/programs/{programId}", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ticketCategories[0].remainNumber").value(20));
+        mockMvc.perform(get("/api/programs/{programId}/seats", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].sellStatus").value(1))
+                .andExpect(jsonPath("$.data[1].sellStatus").value(1));
+
+        lockInventory(programId, ticketCategoryId, firstSeatId, secondSeatId, 90002L);
+        markInventorySold(programId, ticketCategoryId, firstSeatId, secondSeatId, 90002L);
+        mockMvc.perform(get("/api/programs/{programId}", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ticketCategories[0].remainNumber").value(18));
+        mockMvc.perform(get("/api/programs/{programId}/seats", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].sellStatus").value(3))
+                .andExpect(jsonPath("$.data[1].sellStatus").value(3));
     }
 
     /**
@@ -145,5 +178,57 @@ class ProgramControllerTest {
                 .andReturn();
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
         return json.path("data").path("id").asLong();
+    }
+
+    /**
+     * Locks two seats and ticket category stock for one order.
+     */
+    private void lockInventory(Long programId, Long ticketCategoryId, Long firstSeatId, Long secondSeatId, Long orderNumber) throws Exception {
+        postInventoryAction(programId, ticketCategoryId, firstSeatId, secondSeatId, orderNumber, "lock");
+    }
+
+    /**
+     * Releases two locked seats and ticket category stock for one order.
+     */
+    private void releaseInventory(Long programId, Long ticketCategoryId, Long firstSeatId, Long secondSeatId, Long orderNumber) throws Exception {
+        postInventoryAction(programId, ticketCategoryId, firstSeatId, secondSeatId, orderNumber, "release");
+    }
+
+    /**
+     * Marks two locked seats as sold for one paid order.
+     */
+    private void markInventorySold(Long programId, Long ticketCategoryId, Long firstSeatId, Long secondSeatId, Long orderNumber) throws Exception {
+        postInventoryAction(programId, ticketCategoryId, firstSeatId, secondSeatId, orderNumber, "sold");
+    }
+
+    /**
+     * Posts one inventory action request.
+     */
+    private void postInventoryAction(
+            Long programId,
+            Long ticketCategoryId,
+            Long firstSeatId,
+            Long secondSeatId,
+            Long orderNumber,
+            String action
+    ) throws Exception {
+        mockMvc.perform(post("/api/programs/{programId}/inventory/{action}", programId, action)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orderNumber": %d,
+                                  "items": [
+                                    {
+                                      "ticketCategoryId": %d,
+                                      "seatId": %d
+                                    },
+                                    {
+                                      "ticketCategoryId": %d,
+                                      "seatId": %d
+                                    }
+                                  ]
+                                }
+                                """.formatted(orderNumber, ticketCategoryId, firstSeatId, ticketCategoryId, secondSeatId)))
+                .andExpect(status().isOk());
     }
 }

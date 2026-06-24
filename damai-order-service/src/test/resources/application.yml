@@ -25,9 +25,16 @@ mybatis:
     map-underscore-to-camel-case: true
 
 damai:
+  program-service:
+    base-url: http://localhost:8082
   order:
     timeout-minutes: 15
     timeout-scan-enabled: false
     timeout-scan-delay-millis: 600000
+    async:
+      enabled: false
+      create-topic: damai-order-create-test
+    inventory:
+      enabled: false
     lock:
       redisson-enabled: false

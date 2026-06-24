@@ -94,4 +94,19 @@ public interface ProgramDao {
      * Lists seats by program id.
      */
     List<Seat> listSeats(Long programId);
+
+    /**
+     * Decreases remaining stock for one ticket category.
+     */
+    boolean decreaseTicketCategoryRemain(Long programId, Long ticketCategoryId, long quantity);
+
+    /**
+     * Increases remaining stock for one ticket category.
+     */
+    boolean increaseTicketCategoryRemain(Long programId, Long ticketCategoryId, long quantity);
+
+    /**
+     * Updates one seat status if it is currently in the expected status.
+     */
+    boolean updateSeatSellStatus(Long programId, Long ticketCategoryId, Long seatId, int fromStatus, int toStatus);
 }

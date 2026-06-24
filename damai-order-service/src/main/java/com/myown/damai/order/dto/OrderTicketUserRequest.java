@@ -11,7 +11,7 @@ public record OrderTicketUserRequest(
         @NotNull Long ticketUserId,
         Long seatId,
         String seatInfo,
-        Long ticketCategoryId,
+        @NotNull Long ticketCategoryId,
         @NotNull @DecimalMin("0") BigDecimal orderPrice
 ) {
 }

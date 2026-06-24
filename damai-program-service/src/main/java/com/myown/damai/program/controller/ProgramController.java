@@ -4,6 +4,7 @@ import com.myown.damai.program.dto.ProgramCategoryRequest;
 import com.myown.damai.program.dto.ProgramCategoryResponse;
 import com.myown.damai.program.dto.ProgramCreateRequest;
 import com.myown.damai.program.dto.ProgramDetailResponse;
+import com.myown.damai.program.dto.ProgramInventoryRequest;
 import com.myown.damai.program.dto.ProgramResponse;
 import com.myown.damai.program.dto.SeatBatchCreateRequest;
 import com.myown.damai.program.dto.SeatResponse;
@@ -168,5 +169,47 @@ public class ProgramController {
         List<SeatResponse> seats = programService.listSeats(programId);
         LOGGER.info("program seat list request succeeded, programId={}, seatCount={}", programId, seats.size());
         return ApiResponse.success(seats);
+    }
+
+    /**
+     * Locks ticket stock and optional seats for one order.
+     */
+    @PostMapping("/{programId}/inventory/lock")
+    public ApiResponse<Void> lockInventory(
+            @PathVariable Long programId,
+            @Valid @RequestBody ProgramInventoryRequest request
+    ) {
+        LOGGER.info("program inventory lock request received, programId={}, orderNumber={}", programId, request.orderNumber());
+        programService.lockInventory(programId, request);
+        LOGGER.info("program inventory lock request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
+        return ApiResponse.success();
+    }
+
+    /**
+     * Releases ticket stock and locked seats for one canceled order.
+     */
+    @PostMapping("/{programId}/inventory/release")
+    public ApiResponse<Void> releaseInventory(
+            @PathVariable Long programId,
+            @Valid @RequestBody ProgramInventoryRequest request
+    ) {
+        LOGGER.info("program inventory release request received, programId={}, orderNumber={}", programId, request.orderNumber());
+        programService.releaseInventory(programId, request);
+        LOGGER.info("program inventory release request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
+        return ApiResponse.success();
+    }
+
+    /**
+     * Marks locked seats as sold after an order is paid.
+     */
+    @PostMapping("/{programId}/inventory/sold")
+    public ApiResponse<Void> markInventorySold(
+            @PathVariable Long programId,
+            @Valid @RequestBody ProgramInventoryRequest request
+    ) {
+        LOGGER.info("program inventory sold request received, programId={}, orderNumber={}", programId, request.orderNumber());
+        programService.markInventorySold(programId, request);
+        LOGGER.info("program inventory sold request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
+        return ApiResponse.success();
     }
 }

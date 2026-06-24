@@ -7,6 +7,8 @@ import com.myown.damai.program.dto.ProgramCategoryRequest;
 import com.myown.damai.program.dto.ProgramCategoryResponse;
 import com.myown.damai.program.dto.ProgramCreateRequest;
 import com.myown.damai.program.dto.ProgramDetailResponse;
+import com.myown.damai.program.dto.ProgramInventoryItemRequest;
+import com.myown.damai.program.dto.ProgramInventoryRequest;
 import com.myown.damai.program.dto.ProgramResponse;
 import com.myown.damai.program.dto.ProgramShowTimeRequest;
 import com.myown.damai.program.dto.ProgramShowTimeResponse;
@@ -20,6 +22,7 @@ import com.myown.damai.program.entity.ProgramGroup;
 import com.myown.damai.program.entity.ProgramShowTime;
 import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
+import com.myown.damai.program.entity.SeatSellStatus;
 import com.myown.damai.program.entity.TicketCategory;
 import com.myown.damai.program.search.ProgramBloomFilter;
 import com.myown.damai.program.search.ProgramSearchGateway;
@@ -421,6 +424,88 @@ public class ProgramService {
                 .stream()
                 .map(SeatResponse::from)
                 .toList();
+    }
+
+    /**
+     * Locks ticket category stock and optional seats for one unpaid order.
+     */
+    @Transactional
+    public void lockInventory(Long programId, ProgramInventoryRequest request) {
+        findProgramOrThrow(programId);
+        Map<Long, Long> quantityByTicketCategory = countItemsByTicketCategory(request.items());
+        quantityByTicketCategory.forEach((ticketCategoryId, quantity) -> {
+            boolean decreased = programDao.decreaseTicketCategoryRemain(programId, ticketCategoryId, quantity);
+            if (!decreased) {
+                throw new BusinessException("PROGRAM_INVENTORY_NOT_ENOUGH", "ticket category inventory is not enough", HttpStatus.CONFLICT);
+            }
+        });
+        updateSeatStatuses(programId, request.items(), SeatSellStatus.AVAILABLE, SeatSellStatus.LOCKED, "PROGRAM_SEAT_NOT_AVAILABLE");
+        deleteCache(programDetailKey(programId));
+        LOGGER.info("program inventory locked, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
+    }
+
+    /**
+     * Releases ticket category stock and locked seats for one canceled or timed-out order.
+     */
+    @Transactional
+    public void releaseInventory(Long programId, ProgramInventoryRequest request) {
+        findProgramOrThrow(programId);
+        Map<Long, Long> quantityByTicketCategory = countItemsByTicketCategory(request.items());
+        quantityByTicketCategory.forEach((ticketCategoryId, quantity) -> {
+            boolean increased = programDao.increaseTicketCategoryRemain(programId, ticketCategoryId, quantity);
+            if (!increased) {
+                throw new BusinessException("PROGRAM_INVENTORY_RELEASE_FAILED", "ticket category inventory release failed", HttpStatus.CONFLICT);
+            }
+        });
+        updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.AVAILABLE, "PROGRAM_SEAT_RELEASE_FAILED");
+        deleteCache(programDetailKey(programId));
+        LOGGER.info("program inventory released, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
+    }
+
+    /**
+     * Marks locked seats as sold after payment succeeds.
+     */
+    @Transactional
+    public void markInventorySold(Long programId, ProgramInventoryRequest request) {
+        findProgramOrThrow(programId);
+        updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.SOLD, "PROGRAM_SEAT_SOLD_FAILED");
+        deleteCache(programDetailKey(programId));
+        LOGGER.info("program inventory sold, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
+    }
+
+    /**
+     * Counts requested tickets by ticket category.
+     */
+    private Map<Long, Long> countItemsByTicketCategory(List<ProgramInventoryItemRequest> items) {
+        return items.stream()
+                .collect(Collectors.groupingBy(ProgramInventoryItemRequest::ticketCategoryId, Collectors.counting()));
+    }
+
+    /**
+     * Updates selected seats from one status to another.
+     */
+    private void updateSeatStatuses(
+            Long programId,
+            List<ProgramInventoryItemRequest> items,
+            SeatSellStatus fromStatus,
+            SeatSellStatus toStatus,
+            String errorCode
+    ) {
+        for (ProgramInventoryItemRequest item : items) {
+            if (item.seatId() == null) {
+                continue;
+            }
+            boolean updated = programDao.updateSeatSellStatus(
+                    programId,
+                    item.ticketCategoryId(),
+                    item.seatId(),
+                    fromStatus.code(),
+                    toStatus.code()
+            );
+            if (!updated) {
+                throw new BusinessException(errorCode, "seat status update failed", HttpStatus.CONFLICT);
+            }
+        }
     }
 
     /**

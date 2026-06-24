@@ -285,4 +285,34 @@
           AND status = 1
         ORDER BY row_code ASC, col_code ASC
     </select>
+
+    <update id="decreaseTicketCategoryRemain">
+        UPDATE d_ticket_category
+        SET remain_number = remain_number - #{quantity},
+            edit_time = #{now}
+        WHERE id = #{ticketCategoryId}
+          AND program_id = #{programId}
+          AND status = 1
+          AND remain_number >= #{quantity}
+    </update>
+
+    <update id="increaseTicketCategoryRemain">
+        UPDATE d_ticket_category
+        SET remain_number = LEAST(total_number, remain_number + #{quantity}),
+            edit_time = #{now}
+        WHERE id = #{ticketCategoryId}
+          AND program_id = #{programId}
+          AND status = 1
+    </update>
+
+    <update id="updateSeatSellStatus">
+        UPDATE d_seat
+        SET sell_status = #{toStatus},
+            edit_time = #{now}
+        WHERE id = #{seatId}
+          AND program_id = #{programId}
+          AND ticket_category_id = #{ticketCategoryId}
+          AND sell_status = #{fromStatus}
+          AND status = 1
+    </update>
 </mapper>

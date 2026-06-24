@@ -7,6 +7,7 @@ import com.myown.damai.program.entity.ProgramShowTime;
 import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
+import java.time.Instant;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -102,4 +103,36 @@ public interface ProgramMapper {
      * Lists seats for a program.
      */
     List<Seat> selectSeatsByProgramId(@Param("programId") Long programId);
+
+    /**
+     * Decreases remaining stock for one ticket category when enough stock is available.
+     */
+    int decreaseTicketCategoryRemain(
+            @Param("programId") Long programId,
+            @Param("ticketCategoryId") Long ticketCategoryId,
+            @Param("quantity") long quantity,
+            @Param("now") Instant now
+    );
+
+    /**
+     * Increases remaining stock for one ticket category without exceeding total stock.
+     */
+    int increaseTicketCategoryRemain(
+            @Param("programId") Long programId,
+            @Param("ticketCategoryId") Long ticketCategoryId,
+            @Param("quantity") long quantity,
+            @Param("now") Instant now
+    );
+
+    /**
+     * Updates one seat status when it is currently in the expected status.
+     */
+    int updateSeatSellStatus(
+            @Param("programId") Long programId,
+            @Param("ticketCategoryId") Long ticketCategoryId,
+            @Param("seatId") Long seatId,
+            @Param("fromStatus") int fromStatus,
+            @Param("toStatus") int toStatus,
+            @Param("now") Instant now
+    );
 }
