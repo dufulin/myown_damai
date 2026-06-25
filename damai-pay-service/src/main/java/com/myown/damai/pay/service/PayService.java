@@ -3,12 +3,14 @@ package com.myown.damai.pay.service;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.pay.client.OrderClient;
 import com.myown.damai.pay.dao.PayBillDao;
-import com.myown.damai.pay.dto.OrderPayRequest;
+import com.myown.damai.pay.dao.PayOrderEventDao;
 import com.myown.damai.pay.dto.OrderSnapshot;
 import com.myown.damai.pay.dto.PagePayRequest;
 import com.myown.damai.pay.dto.PagePayResponse;
 import com.myown.damai.pay.entity.PayBill;
 import com.myown.damai.pay.entity.PayBillStatus;
+import com.myown.damai.pay.entity.PayOrderEvent;
+import com.myown.damai.pay.entity.PayOrderEventStatus;
 import com.myown.damai.pay.integration.AlipayPagePayClient;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -20,6 +22,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,45 +37,58 @@ public class PayService {
     private static final Logger LOGGER = LoggerFactory.getLogger(PayService.class);
     private static final DateTimeFormatter ALIPAY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final String PAY_SUCCESS_EVENT_TYPE = "PAY_SUCCESS";
+    private static final String PAY_SUCCESS_EVENT_KEY_PREFIX = "pay-success:";
     private static final AtomicInteger PAY_SEQUENCE = new AtomicInteger(ThreadLocalRandom.current().nextInt(1000));
 
     private final PayBillDao payBillDao;
+    private final PayOrderEventDao payOrderEventDao;
     private final OrderClient orderClient;
     private final AlipayPagePayClient alipayPagePayClient;
+    private final int maxOrderNotifyRetryCount;
 
     /**
      * Creates the payment service with persistence, order, and Alipay integrations.
      */
-    public PayService(PayBillDao payBillDao, OrderClient orderClient, AlipayPagePayClient alipayPagePayClient) {
+    public PayService(
+            PayBillDao payBillDao,
+            PayOrderEventDao payOrderEventDao,
+            OrderClient orderClient,
+            AlipayPagePayClient alipayPagePayClient,
+            @Value("${damai.pay.event.max-retry-count:5}") int maxOrderNotifyRetryCount
+    ) {
         this.payBillDao = payBillDao;
+        this.payOrderEventDao = payOrderEventDao;
         this.orderClient = orderClient;
         this.alipayPagePayClient = alipayPagePayClient;
+        this.maxOrderNotifyRetryCount = maxOrderNotifyRetryCount;
     }
 
     /**
-     * Creates or reuses a payment bill and directly marks the order as paid for local development.
+     * Creates or reuses a payment bill and records a local order notification event.
      */
     @Transactional
-    public PagePayResponse createAlipayPagePay(PagePayRequest request) {
-        OrderSnapshot order = orderClient.getOrder(request.orderNumber());
-        validateOrderPayable(order, request.userId());
+    public PagePayResponse createAlipayPagePay(PagePayRequest request, Long authenticatedUserId) {
+        validateAuthenticatedUserId(authenticatedUserId);
+        OrderSnapshot order = orderClient.getOrder(request.orderNumber(), authenticatedUserId);
+        validateOrderPayable(order, authenticatedUserId);
         PayBill bill = payBillDao.findByOutOrderNo(String.valueOf(order.orderNumber()))
                 .orElseGet(() -> payBillDao.save(buildPayBill(order)));
         String tradeNumber = "MOCK" + bill.payNumber;
         Instant payTime = Instant.now();
         payBillDao.markPaid(bill.outOrderNo, tradeNumber, bill.payAmount, payTime, PayBillStatus.PAID.code);
-        orderClient.markOrderPaid(order.orderNumber(), new OrderPayRequest(tradeNumber, bill.payAmount, payTime));
+        payOrderEventDao.saveIfAbsent(buildPaySuccessEvent(bill.outOrderNo, order.orderNumber(), tradeNumber, bill.payAmount, payTime));
         bill.tradeNumber = tradeNumber;
         bill.payTime = payTime;
         bill.payBillStatus = PayBillStatus.PAID.code;
         bill.updatedAt = payTime;
-        String payForm = "<div>模拟支付成功，订单已更新为已支付。</div>";
-        LOGGER.info("mock alipay page pay succeeded, orderNumber={}, payBillId={}", order.orderNumber(), bill.id);
+        String payForm = "<div>mock pay succeeded, order status will be updated asynchronously.</div>";
+        LOGGER.info("mock alipay page pay succeeded and order event recorded, orderNumber={}, payBillId={}", order.orderNumber(), bill.id);
         return PagePayResponse.of(bill, payForm);
     }
 
     /**
-     * Handles an Alipay asynchronous notify and updates payment and order statuses.
+     * Handles an Alipay asynchronous notify and records a local order notification event.
      */
     @Transactional
     public String handleAlipayNotify(Map<String, String> notifyParams) {
@@ -93,8 +109,8 @@ public class PayService {
         PayBill bill = payBillDao.findByOutOrderNo(outTradeNo)
                 .orElseThrow(() -> new BusinessException("PAY_BILL_NOT_FOUND", "pay bill not found", HttpStatus.NOT_FOUND));
         payBillDao.markPaid(outTradeNo, tradeNo, totalAmount, payTime, PayBillStatus.PAID.code);
-        orderClient.markOrderPaid(Long.valueOf(outTradeNo), new OrderPayRequest(tradeNo, totalAmount, payTime));
-        LOGGER.info("alipay notify handled, outTradeNo={}, tradeNo={}, payBillId={}", outTradeNo, tradeNo, bill.id);
+        payOrderEventDao.saveIfAbsent(buildPaySuccessEvent(outTradeNo, Long.valueOf(outTradeNo), tradeNo, totalAmount, payTime));
+        LOGGER.info("alipay notify handled and order event recorded, outTradeNo={}, tradeNo={}, payBillId={}", outTradeNo, tradeNo, bill.id);
         return "success";
     }
 
@@ -110,6 +126,15 @@ public class PayService {
         }
         if (!Integer.valueOf(1).equals(order.orderStatus())) {
             throw new BusinessException("ORDER_STATUS_NOT_PAYABLE", "only unpaid orders can be paid", HttpStatus.CONFLICT);
+        }
+    }
+
+    /**
+     * Verifies the payment request carries the gateway-authenticated user id.
+     */
+    private void validateAuthenticatedUserId(Long userId) {
+        if (userId == null) {
+            throw new BusinessException("UNAUTHORIZED", "missing authenticated user id", HttpStatus.UNAUTHORIZED);
         }
     }
 
@@ -131,6 +156,35 @@ public class PayService {
         bill.updatedAt = now;
         bill.status = 1;
         return bill;
+    }
+
+    /**
+     * Builds a local event used to notify the order service after payment succeeds.
+     */
+    private PayOrderEvent buildPaySuccessEvent(
+            String outOrderNo,
+            Long orderNumber,
+            String tradeNumber,
+            BigDecimal payAmount,
+            Instant payTime
+    ) {
+        Instant now = Instant.now();
+        PayOrderEvent event = new PayOrderEvent();
+        event.eventKey = PAY_SUCCESS_EVENT_KEY_PREFIX + outOrderNo;
+        event.outOrderNo = outOrderNo;
+        event.orderNumber = orderNumber;
+        event.tradeNumber = tradeNumber;
+        event.payAmount = payAmount;
+        event.payTime = payTime;
+        event.eventType = PAY_SUCCESS_EVENT_TYPE;
+        event.eventStatus = PayOrderEventStatus.INIT.code;
+        event.retryCount = 0;
+        event.maxRetryCount = maxOrderNotifyRetryCount;
+        event.nextRetryTime = now;
+        event.createdAt = now;
+        event.updatedAt = now;
+        event.status = 1;
+        return event;
     }
 
     /**

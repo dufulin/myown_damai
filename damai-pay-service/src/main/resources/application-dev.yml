@@ -1,0 +1,12 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+
+damai:
+  pay:
+    order-service-url: ${DAMAI_ORDER_SERVICE_URL:http://damai-order-service}
+

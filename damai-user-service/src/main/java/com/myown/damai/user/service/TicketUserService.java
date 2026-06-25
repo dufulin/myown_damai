@@ -22,22 +22,19 @@ public class TicketUserService {
     private static final Logger LOGGER = LoggerFactory.getLogger(TicketUserService.class);
 
     private final TicketUserDao ticketUserDao;
-    private final UserService userService;
 
     /**
-     * Creates the service with ticket buyer persistence and user-session validation.
+     * Creates the service with ticket buyer persistence.
      */
-    public TicketUserService(TicketUserDao ticketUserDao, UserService userService) {
+    public TicketUserService(TicketUserDao ticketUserDao) {
         this.ticketUserDao = ticketUserDao;
-        this.userService = userService;
     }
 
     /**
      * Lists active ticket buyers for the current logged-in user.
      */
     @Transactional(readOnly = true)
-    public List<TicketUserResponse> listTicketUsers(String authorizationHeader) {
-        Long userId = userService.currentUserId(authorizationHeader);
+    public List<TicketUserResponse> listTicketUsers(Long userId) {
         return ticketUserDao.listByUserId(userId)
                 .stream()
                 .map(TicketUserResponse::from)
@@ -48,8 +45,7 @@ public class TicketUserService {
      * Creates one ticket buyer for the current logged-in user.
      */
     @Transactional
-    public TicketUserResponse createTicketUser(String authorizationHeader, TicketUserCreateRequest request) {
-        Long userId = userService.currentUserId(authorizationHeader);
+    public TicketUserResponse createTicketUser(Long userId, TicketUserCreateRequest request) {
         TicketUser ticketUser = new TicketUser();
         ticketUser.setUserId(userId);
         ticketUser.setRelName(normalizeRequired(request.relName(), "relName"));
@@ -64,8 +60,7 @@ public class TicketUserService {
      * Deletes one ticket buyer for the current logged-in user.
      */
     @Transactional
-    public void deleteTicketUser(String authorizationHeader, Long ticketUserId) {
-        Long userId = userService.currentUserId(authorizationHeader);
+    public void deleteTicketUser(Long userId, Long ticketUserId) {
         boolean deleted = ticketUserDao.deleteByIdAndUserId(ticketUserId, userId);
         if (!deleted) {
             LOGGER.warn("ticket user delete rejected because row was not found, userId={}, ticketUserId={}", userId, ticketUserId);

@@ -1,6 +1,7 @@
 package com.myown.damai.order.controller;
 
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.order.dto.OrderAsyncMessageResponse;
 import com.myown.damai.order.dto.OrderCancelRequest;
 import com.myown.damai.order.dto.OrderCreateRequest;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -44,9 +46,13 @@ public class OrderController {
      * Creates one unpaid order.
      */
     @PostMapping
-    public ResponseEntity<ApiResponse<OrderResponse>> createOrder(@Valid @RequestBody OrderCreateRequest request) {
-        LOGGER.info("order create request received, userId={}, programId={}", request.userId(), request.programId());
-        OrderResponse response = orderService.createOrder(request);
+    public ResponseEntity<ApiResponse<OrderResponse>> createOrder(
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
+            @Valid @RequestBody OrderCreateRequest request
+    ) {
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("order create request received, userId={}, programId={}", authenticatedUserId, request.programId());
+        OrderResponse response = orderService.createOrder(request.withUserId(authenticatedUserId));
         LOGGER.info("order create request succeeded, orderNumber={}", response.orderNumber());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
@@ -55,9 +61,13 @@ public class OrderController {
      * Gets one order detail by order number.
      */
     @GetMapping("/{orderNumber}")
-    public ApiResponse<OrderResponse> getOrder(@PathVariable Long orderNumber) {
-        LOGGER.info("order detail request received, orderNumber={}", orderNumber);
-        OrderResponse response = orderService.getOrder(orderNumber);
+    public ApiResponse<OrderResponse> getOrder(
+            @PathVariable Long orderNumber,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader
+    ) {
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("order detail request received, orderNumber={}, userId={}", orderNumber, authenticatedUserId);
+        OrderResponse response = orderService.getOrderForUser(orderNumber, authenticatedUserId);
         LOGGER.info("order detail request succeeded, orderNumber={}", orderNumber);
         return ApiResponse.success(response);
     }
@@ -66,9 +76,13 @@ public class OrderController {
      * Gets asynchronous order creation message status by order number.
      */
     @GetMapping("/{orderNumber}/async-message")
-    public ApiResponse<OrderAsyncMessageResponse> getAsyncMessage(@PathVariable Long orderNumber) {
-        LOGGER.info("order async message status request received, orderNumber={}", orderNumber);
-        OrderAsyncMessageResponse response = orderService.getAsyncMessage(orderNumber);
+    public ApiResponse<OrderAsyncMessageResponse> getAsyncMessage(
+            @PathVariable Long orderNumber,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader
+    ) {
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("order async message status request received, orderNumber={}, userId={}", orderNumber, authenticatedUserId);
+        OrderAsyncMessageResponse response = orderService.getAsyncMessageForUser(orderNumber, authenticatedUserId);
         LOGGER.info("order async message status request succeeded, orderNumber={}, status={}", orderNumber, response.messageStatusName());
         return ApiResponse.success(response);
     }
@@ -78,13 +92,14 @@ public class OrderController {
      */
     @GetMapping
     public ApiResponse<List<OrderResponse>> listOrders(
-            @RequestParam("userId") Long userId,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
             @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
             @RequestParam(value = "pageSize", defaultValue = "20") int pageSize
     ) {
-        LOGGER.info("order list request received, userId={}", userId);
-        List<OrderResponse> orders = orderService.listOrders(userId, pageNumber, pageSize);
-        LOGGER.info("order list request succeeded, userId={}, count={}", userId, orders.size());
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("order list request received, userId={}", authenticatedUserId);
+        List<OrderResponse> orders = orderService.listOrders(authenticatedUserId, pageNumber, pageSize);
+        LOGGER.info("order list request succeeded, userId={}, count={}", authenticatedUserId, orders.size());
         return ApiResponse.success(orders);
     }
 
@@ -94,10 +109,12 @@ public class OrderController {
     @PostMapping("/{orderNumber}/cancel")
     public ApiResponse<OrderResponse> cancelOrder(
             @PathVariable Long orderNumber,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
             @RequestBody(required = false) OrderCancelRequest request
     ) {
-        LOGGER.info("order cancel request received, orderNumber={}, hasReason={}", orderNumber, request != null && request.reason() != null);
-        OrderResponse response = orderService.cancelOrder(orderNumber);
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("order cancel request received, orderNumber={}, userId={}, hasReason={}", orderNumber, authenticatedUserId, request != null && request.reason() != null);
+        OrderResponse response = orderService.cancelOrderForUser(orderNumber, authenticatedUserId);
         LOGGER.info("order cancel request succeeded, orderNumber={}", orderNumber);
         return ApiResponse.success(response);
     }
@@ -126,4 +143,5 @@ public class OrderController {
         LOGGER.info("order timeout cancel request succeeded, canceledCount={}", canceledCount);
         return ApiResponse.success(new OrderTimeoutCancelResponse(canceledCount));
     }
+
 }

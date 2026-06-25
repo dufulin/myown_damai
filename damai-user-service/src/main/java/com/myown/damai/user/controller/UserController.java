@@ -1,6 +1,7 @@
 package com.myown.damai.user.controller;
 
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.user.dto.AuthResponse;
 import com.myown.damai.user.dto.LoginRequest;
 import com.myown.damai.user.dto.RegisterRequest;
@@ -102,10 +103,11 @@ public class UserController {
      */
     @GetMapping("/ticket-users")
     public ApiResponse<List<TicketUserResponse>> listTicketUsers(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader
     ) {
-        LOGGER.info("ticket user list request received, hasAuthorizationHeader={}", authorizationHeader != null);
-        List<TicketUserResponse> ticketUsers = ticketUserService.listTicketUsers(authorizationHeader);
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("ticket user list request received, userId={}", authenticatedUserId);
+        List<TicketUserResponse> ticketUsers = ticketUserService.listTicketUsers(authenticatedUserId);
         LOGGER.info("ticket user list request succeeded, count={}", ticketUsers.size());
         return ApiResponse.success(ticketUsers);
     }
@@ -115,11 +117,12 @@ public class UserController {
      */
     @PostMapping("/ticket-users")
     public ResponseEntity<ApiResponse<TicketUserResponse>> createTicketUser(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
             @Valid @RequestBody TicketUserCreateRequest request
     ) {
-        LOGGER.info("ticket user create request received, relName={}", request.relName());
-        TicketUserResponse ticketUser = ticketUserService.createTicketUser(authorizationHeader, request);
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("ticket user create request received, userId={}, relName={}", authenticatedUserId, request.relName());
+        TicketUserResponse ticketUser = ticketUserService.createTicketUser(authenticatedUserId, request);
         LOGGER.info("ticket user create request succeeded, ticketUserId={}", ticketUser.id());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(ticketUser));
     }
@@ -129,11 +132,12 @@ public class UserController {
      */
     @DeleteMapping("/ticket-users/{ticketUserId}")
     public ApiResponse<Void> deleteTicketUser(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
             @PathVariable Long ticketUserId
     ) {
-        LOGGER.info("ticket user delete request received, ticketUserId={}", ticketUserId);
-        ticketUserService.deleteTicketUser(authorizationHeader, ticketUserId);
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("ticket user delete request received, userId={}, ticketUserId={}", authenticatedUserId, ticketUserId);
+        ticketUserService.deleteTicketUser(authenticatedUserId, ticketUserId);
         LOGGER.info("ticket user delete request succeeded, ticketUserId={}", ticketUserId);
         return ApiResponse.success();
     }

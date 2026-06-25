@@ -13,7 +13,7 @@ import java.util.List;
 public record OrderCreateRequest(
         @NotNull Long programId,
         String programItemPicture,
-        @NotNull Long userId,
+        Long userId,
         @Size(max = 512) String programTitle,
         @Size(max = 100) String programPlace,
         Instant programShowTime,
@@ -23,4 +23,23 @@ public record OrderCreateRequest(
         Integer payOrderType,
         @NotEmpty List<@Valid OrderTicketUserRequest> ticketUsers
 ) {
+
+    /**
+     * Returns a copy of the request with the authenticated user id supplied by the gateway.
+     */
+    public OrderCreateRequest withUserId(Long authenticatedUserId) {
+        return new OrderCreateRequest(
+                programId,
+                programItemPicture,
+                authenticatedUserId,
+                programTitle,
+                programPlace,
+                programShowTime,
+                programPermitChooseSeat,
+                distributionMode,
+                takeTicketMode,
+                payOrderType,
+                ticketUsers
+        );
+    }
 }

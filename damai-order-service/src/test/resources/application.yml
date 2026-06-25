@@ -3,6 +3,10 @@ spring:
     discovery:
       enabled: false
     nacos:
+      config:
+        enabled: false
+        import-check:
+          enabled: false
       discovery:
         enabled: false
         register-enabled: false

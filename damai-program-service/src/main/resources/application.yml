@@ -2,10 +2,12 @@ server:
   port: 8082
 
 spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: damai-program-service
   datasource:
-    url: ${DAMAI_PROGRAM_DB_URL:${DAMAI_DB_URL:jdbc:mysql://localhost:3306/myown_damai?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
+    url: ${DAMAI_PROGRAM_DB_URL:${DAMAI_DB_URL:jdbc:mysql://${DAMAI_MYSQL_HOST:localhost}:${DAMAI_MYSQL_PORT:3306}/${DAMAI_MYSQL_DATABASE:myown_damai}?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
     username: ${DAMAI_DB_USERNAME:root}
     password: ${DAMAI_DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -20,14 +22,25 @@ spring:
       timeout: 2s
   cloud:
     nacos:
-      username: nacos
-      password: nacos
+      username: ${DAMAI_NACOS_USERNAME:nacos}
+      password: ${DAMAI_NACOS_PASSWORD:nacos}
+      config:
+        enabled: ${DAMAI_NACOS_CONFIG_ENABLED:false}
+        import-check:
+          enabled: false
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+        username: ${DAMAI_NACOS_USERNAME:nacos}
+        password: ${DAMAI_NACOS_PASSWORD:nacos}
+        namespace: ${DAMAI_NACOS_NAMESPACE:}
+        group: ${DAMAI_NACOS_CONFIG_GROUP:DEFAULT_GROUP}
+        file-extension: yml
       discovery:
         enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
         register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
-        server-addr: localhost:8848
-        username: nacos
-        password: nacos
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+        username: ${DAMAI_NACOS_USERNAME:nacos}
+        password: ${DAMAI_NACOS_PASSWORD:nacos}
+        namespace: ${DAMAI_NACOS_NAMESPACE:}
         service: ${spring.application.name}
         group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
   sql:
@@ -48,7 +61,7 @@ damai:
   search:
     es-enabled: true
     startup-sync-enabled: true
-    uri: ${DAMAI_ES_URI:http://localhost:9200}
+    uri: ${DAMAI_ES_URI:http://${DAMAI_ES_HOST:localhost}:${DAMAI_ES_PORT:9200}}
     username: ${DAMAI_ES_USERNAME:}
     password: ${DAMAI_ES_PASSWORD:}
     index-name: ${DAMAI_ES_PROGRAM_INDEX:damai_program_detail}

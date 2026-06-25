@@ -26,6 +26,8 @@ import org.springframework.test.web.servlet.MvcResult;
 @AutoConfigureMockMvc
 class UserControllerTest {
 
+    private static final String USER_ID_HEADER = "X-Damai-User-Id";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -162,13 +164,14 @@ class UserControllerTest {
                                 """))
                 .andExpect(status().isCreated())
                 .andReturn();
-        String token = objectMapper.readTree(registerResult.getResponse().getContentAsString())
+        Long userId = objectMapper.readTree(registerResult.getResponse().getContentAsString())
                 .path("data")
-                .path("token")
-                .asText();
+                .path("user")
+                .path("id")
+                .asLong();
 
         MvcResult ticketUserResult = mockMvc.perform(post("/api/users/ticket-users")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header(USER_ID_HEADER, String.valueOf(userId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -187,18 +190,18 @@ class UserControllerTest {
                 .asLong();
 
         mockMvc.perform(get("/api/users/ticket-users")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                        .header(USER_ID_HEADER, String.valueOf(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].id").value(ticketUserId));
 
         mockMvc.perform(delete("/api/users/ticket-users/{ticketUserId}", ticketUserId)
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                        .header(USER_ID_HEADER, String.valueOf(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
         mockMvc.perform(get("/api/users/ticket-users")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                        .header(USER_ID_HEADER, String.valueOf(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(0)));
     }

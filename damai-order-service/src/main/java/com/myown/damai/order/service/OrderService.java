@@ -123,6 +123,7 @@ public class OrderService {
      * Creates one unpaid order with idempotency and a program-level distributed lock.
      */
     public OrderResponse createOrder(OrderCreateRequest request) {
+        validateAuthenticatedUserId(request.userId());
         Optional<Order> existingOrder = findExistingOrder(request.userId(), request.programId());
         if (existingOrder.isPresent()) {
             LOGGER.info(
@@ -149,6 +150,7 @@ public class OrderService {
      * Creates one order from a Kafka asynchronous order creation message.
      */
     public OrderResponse createOrderFromAsyncMessage(OrderAsyncCreateMessage message) {
+        validateAuthenticatedUserId(message.request().userId());
         return orderLockExecutor.executeWithProgramLock(message.request().programId(), () -> {
             OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(message.request(), message.orderNumber()));
             removePendingOrder(message.request().userId(), message.request().programId(), message.orderNumber());
@@ -266,6 +268,17 @@ public class OrderService {
     public OrderAsyncMessageResponse getAsyncMessage(Long orderNumber) {
         OrderAsyncMessage message = orderAsyncMessageDao.findLatestByOrderNumber(orderNumber)
                 .orElseThrow(() -> new BusinessException("ORDER_ASYNC_MESSAGE_NOT_FOUND", "order async message not found", HttpStatus.NOT_FOUND));
+        return OrderAsyncMessageResponse.from(message);
+    }
+
+    /**
+     * Gets asynchronous order creation message tracking data after verifying order ownership.
+     */
+    @Transactional(readOnly = true)
+    public OrderAsyncMessageResponse getAsyncMessageForUser(Long orderNumber, Long userId) {
+        OrderAsyncMessage message = orderAsyncMessageDao.findLatestByOrderNumber(orderNumber)
+                .orElseThrow(() -> new BusinessException("ORDER_ASYNC_MESSAGE_NOT_FOUND", "order async message not found", HttpStatus.NOT_FOUND));
+        verifyUserOwnsResource(message.userId, userId);
         return OrderAsyncMessageResponse.from(message);
     }
 
@@ -461,6 +474,16 @@ public class OrderService {
     }
 
     /**
+     * Gets one order detail after verifying it belongs to the authenticated user.
+     */
+    @Transactional(readOnly = true)
+    public OrderResponse getOrderForUser(Long orderNumber, Long userId) {
+        Order order = findOrderOrThrow(orderNumber);
+        verifyUserOwnsResource(order.userId, userId);
+        return buildOrderResponse(order);
+    }
+
+    /**
      * Lists orders for one user with pagination.
      */
     @Transactional(readOnly = true)
@@ -486,6 +509,16 @@ public class OrderService {
         releaseLockedInventory(order, ticketUsers);
         LOGGER.info("order canceled, orderNumber={}", orderNumber);
         return getOrder(orderNumber);
+    }
+
+    /**
+     * Cancels one unpaid order after verifying it belongs to the authenticated user.
+     */
+    @Transactional
+    public OrderResponse cancelOrderForUser(Long orderNumber, Long userId) {
+        Order order = findOrderOrThrow(orderNumber);
+        verifyUserOwnsResource(order.userId, userId);
+        return cancelOrder(orderNumber);
     }
 
     /**
@@ -623,6 +656,24 @@ public class OrderService {
     private Order findOrderOrThrow(Long orderNumber) {
         return orderDao.findOrderByOrderNumber(orderNumber)
                 .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "order not found", HttpStatus.NOT_FOUND));
+    }
+
+    /**
+     * Verifies a persisted resource belongs to the authenticated user.
+     */
+    private void verifyUserOwnsResource(Long resourceUserId, Long authenticatedUserId) {
+        if (!Objects.equals(resourceUserId, authenticatedUserId)) {
+            throw new BusinessException("ORDER_FORBIDDEN", "order does not belong to current user", HttpStatus.FORBIDDEN);
+        }
+    }
+
+    /**
+     * Verifies the order request carries the gateway-authenticated user id.
+     */
+    private void validateAuthenticatedUserId(Long userId) {
+        if (userId == null) {
+            throw new BusinessException("UNAUTHORIZED", "missing authenticated user id", HttpStatus.UNAUTHORIZED);
+        }
     }
 
     /**

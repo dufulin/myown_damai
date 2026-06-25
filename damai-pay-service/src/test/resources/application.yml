@@ -6,6 +6,10 @@ spring:
     driver-class-name: org.h2.Driver
   cloud:
     nacos:
+      config:
+        enabled: false
+        import-check:
+          enabled: false
       discovery:
         enabled: false
         register-enabled: false
@@ -22,6 +26,14 @@ mybatis:
 damai:
   pay:
     order-service-url: http://damai-order-service
+    event:
+      compensation-enabled: false
+      scan-delay-millis: 600000
+      scan-limit: 10
+      max-retry-count: 3
+      retry-base-delay-seconds: 1
+      retry-max-delay-seconds: 2
+      processing-timeout-seconds: 10
     alipay:
       enabled: false
       verify-signature: false

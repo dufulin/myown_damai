@@ -1,6 +1,8 @@
 package com.myown.damai.gateway.filter;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +12,7 @@ import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
@@ -66,12 +69,24 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
                 .header(HttpHeaders.AUTHORIZATION, authorization == null ? "" : authorization)
                 .exchangeToMono(response -> {
                     if (response.statusCode().is2xxSuccessful()) {
-                        LOGGER.info(
-                                "gateway auth passed, method={}, path={}",
-                                exchange.getRequest().getMethod(),
-                                exchange.getRequest().getURI().getPath()
-                        );
-                        return chain.filter(exchange);
+                        return response.bodyToMono(String.class)
+                                .flatMap(body -> {
+                                    String userId = resolveUserId(body);
+                                    LOGGER.info(
+                                            "gateway auth passed, method={}, path={}, userId={}",
+                                            exchange.getRequest().getMethod(),
+                                            exchange.getRequest().getURI().getPath(),
+                                            userId
+                                    );
+                                    ServerHttpRequest request = exchange.getRequest()
+                                            .mutate()
+                                            .headers(headers -> {
+                                                headers.remove(AuthenticatedUserHeader.USER_ID);
+                                                headers.set(AuthenticatedUserHeader.USER_ID, userId);
+                                            })
+                                            .build();
+                                    return chain.filter(exchange.mutate().request(request).build());
+                                });
                     }
                     LOGGER.warn(
                             "gateway auth rejected, method={}, path={}, status={}",
@@ -128,5 +143,21 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     private boolean isPublicPayEndpoint(String path, HttpMethod method) {
         return HttpMethod.POST.equals(method)
                 && "/api/pay/alipay/notify".equals(path);
+    }
+
+    /**
+     * Resolves the authenticated user id from the user service profile response.
+     */
+    private String resolveUserId(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode userIdNode = root.path("data").path("id");
+            if (userIdNode.isIntegralNumber()) {
+                return userIdNode.asText();
+            }
+        } catch (Exception exception) {
+            LOGGER.warn("gateway auth response parse failed", exception);
+        }
+        throw new IllegalStateException("user id is missing from auth response");
     }
 }

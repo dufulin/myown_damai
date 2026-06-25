@@ -34,6 +34,8 @@ import org.springframework.test.web.servlet.MvcResult;
 })
 class OrderControllerTest {
 
+    private static final String USER_ID_HEADER = "X-Damai-User-Id";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -50,14 +52,15 @@ class OrderControllerTest {
     void createQueryListAndCancelOrder() throws Exception {
         Long orderNumber = createOrder(10001L);
 
-        mockMvc.perform(get("/api/orders/{orderNumber}", orderNumber))
+        mockMvc.perform(get("/api/orders/{orderNumber}", orderNumber)
+                        .header(USER_ID_HEADER, "10001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.orderNumber").value(orderNumber))
                 .andExpect(jsonPath("$.data.orderStatus").value(1))
                 .andExpect(jsonPath("$.data.ticketUsers", hasSize(2)));
 
         mockMvc.perform(get("/api/orders")
-                        .param("userId", "10001")
+                        .header(USER_ID_HEADER, "10001")
                         .param("pageNumber", "1")
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
@@ -65,6 +68,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data[0].orderNumber").value(orderNumber));
 
         mockMvc.perform(post("/api/orders/{orderNumber}/cancel", orderNumber)
+                        .header(USER_ID_HEADER, "10001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -87,7 +91,8 @@ class OrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.canceledCount").value(greaterThanOrEqualTo(1)));
 
-        mockMvc.perform(get("/api/orders/{orderNumber}", orderNumber))
+        mockMvc.perform(get("/api/orders/{orderNumber}", orderNumber)
+                        .header(USER_ID_HEADER, "10002"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.orderStatus").value(5))
                 .andExpect(jsonPath("$.data.orderStatusName").value("TIMEOUT"))
@@ -149,7 +154,7 @@ class OrderControllerTest {
         org.assertj.core.api.Assertions.assertThat(secondOrderNumber).isEqualTo(firstOrderNumber);
 
         mockMvc.perform(get("/api/orders")
-                        .param("userId", "10004")
+                        .header(USER_ID_HEADER, "10004")
                         .param("pageNumber", "1")
                         .param("pageSize", "10"))
                 .andExpect(status().isOk())
@@ -167,7 +172,8 @@ class OrderControllerTest {
         orderAsyncMessageDao.saveMessage(message);
         orderAsyncMessageDao.markSent(message.messageKey, message.topic);
 
-        mockMvc.perform(get("/api/orders/{orderNumber}/async-message", orderNumber))
+        mockMvc.perform(get("/api/orders/{orderNumber}/async-message", orderNumber)
+                        .header(USER_ID_HEADER, "10005"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.messageKey").value(message.messageKey))
                 .andExpect(jsonPath("$.data.orderNumber").value(orderNumber))
@@ -180,12 +186,12 @@ class OrderControllerTest {
      */
     private Long createOrder(Long userId) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/orders")
+                        .header(USER_ID_HEADER, String.valueOf(userId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "programId": 20001,
                                   "programItemPicture": "https://example.com/poster.png",
-                                  "userId": %d,
                                   "programTitle": "Demo Concert",
                                   "programPlace": "Demo Arena",
                                   "programShowTime": "2026-08-01T12:00:00Z",
@@ -210,7 +216,7 @@ class OrderControllerTest {
                                     }
                                   ]
                                 }
-                                """.formatted(userId)))
+                                """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.orderNumber", notNullValue()))
                 .andExpect(jsonPath("$.data.orderPrice").value(1360))

@@ -34,3 +34,26 @@ CREATE TABLE IF NOT EXISTS d_refund_bill (
     CONSTRAINT uk_d_refund_bill_out_order_no UNIQUE (out_order_no),
     CONSTRAINT fk_d_refund_bill_pay_bill_id FOREIGN KEY (pay_bill_id) REFERENCES d_pay_bill (id)
 );
+
+CREATE TABLE IF NOT EXISTS d_pay_order_event (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    event_key VARCHAR(128) NOT NULL,
+    out_order_no VARCHAR(64) NOT NULL,
+    order_number BIGINT NOT NULL,
+    trade_number VARCHAR(256) NOT NULL,
+    pay_amount DECIMAL(10, 2) NOT NULL,
+    pay_time DATETIME(6) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    event_status INT NOT NULL DEFAULT 1,
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retry_count INT NOT NULL DEFAULT 5,
+    next_retry_time DATETIME(6) NOT NULL,
+    last_error VARCHAR(1024),
+    create_time DATETIME(6) NOT NULL,
+    edit_time DATETIME(6) NOT NULL,
+    status TINYINT NOT NULL DEFAULT 1,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_d_pay_order_event_key UNIQUE (event_key),
+    INDEX idx_d_pay_order_event_status_retry_time (event_status, next_retry_time),
+    INDEX idx_d_pay_order_event_order_number (order_number)
+);

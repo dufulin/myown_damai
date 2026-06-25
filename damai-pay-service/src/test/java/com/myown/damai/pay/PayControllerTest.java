@@ -2,7 +2,9 @@ package com.myown.damai.pay;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -30,6 +32,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class PayControllerTest {
 
+    private static final String USER_ID_HEADER = "X-Damai-User-Id";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -40,28 +44,46 @@ class PayControllerTest {
     private OrderClient orderClient;
 
     /**
-     * Verifies page-pay creation directly marks the order as paid and notify handling remains compatible.
+     * Verifies page-pay creation records a local event and manual compensation marks the order paid.
      */
     @Test
     void createPagePayAndHandleNotify() throws Exception {
         Long orderNumber = 90010001L;
-        when(orderClient.getOrder(orderNumber))
+        String eventKey = "pay-success:" + orderNumber;
+        when(orderClient.getOrder(orderNumber, 70001L))
                 .thenReturn(new OrderSnapshot(orderNumber, 70001L, "Demo Concert", new BigDecimal("680.00"), 1, null));
         when(orderClient.markOrderPaid(eq(orderNumber), any(OrderPayRequest.class)))
                 .thenReturn(new OrderSnapshot(orderNumber, 70001L, "Demo Concert", new BigDecimal("680.00"), 3, Instant.now()));
 
         mockMvc.perform(post("/api/pay/alipay/page-pay")
+                        .header(USER_ID_HEADER, "70001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "orderNumber": 90010001,
-                                  "userId": 70001
+                                  "orderNumber": 90010001
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.payBillId").exists())
                 .andExpect(jsonPath("$.data.outOrderNo").value("90010001"))
                 .andExpect(jsonPath("$.data.payBillStatus").value(2));
+
+        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eventKey").value(eventKey))
+                .andExpect(jsonPath("$.data.eventStatus").value(1))
+                .andExpect(jsonPath("$.data.eventStatusName").value("INIT"));
+
+        mockMvc.perform(post("/api/pay/events/compensate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.processedCount").value(1));
+
+        verify(orderClient).markOrderPaid(eq(orderNumber), any(OrderPayRequest.class));
+
+        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eventStatus").value(3))
+                .andExpect(jsonPath("$.data.eventStatusName").value("SUCCEEDED"));
 
         mockMvc.perform(post("/api/pay/alipay/notify")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)

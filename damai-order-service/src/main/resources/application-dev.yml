@@ -1,0 +1,12 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+
+damai:
+  program-service:
+    base-url: ${DAMAI_PROGRAM_SERVICE_BASE_URL:http://localhost:8082}
+

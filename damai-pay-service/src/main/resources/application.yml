@@ -2,23 +2,36 @@ server:
   port: 8084
 
 spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: damai-pay-service
   datasource:
-    url: ${DAMAI_PAY_DB_URL:${DAMAI_DB_URL:jdbc:mysql://localhost:3306/myown_damai?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
+    url: ${DAMAI_PAY_DB_URL:${DAMAI_DB_URL:jdbc:mysql://${DAMAI_MYSQL_HOST:localhost}:${DAMAI_MYSQL_PORT:3306}/${DAMAI_MYSQL_DATABASE:myown_damai}?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}}
     username: ${DAMAI_DB_USERNAME:root}
     password: ${DAMAI_DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
   cloud:
     nacos:
-      username: nacos
-      password: nacos
+      username: ${DAMAI_NACOS_USERNAME:nacos}
+      password: ${DAMAI_NACOS_PASSWORD:nacos}
+      config:
+        enabled: ${DAMAI_NACOS_CONFIG_ENABLED:false}
+        import-check:
+          enabled: false
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+        username: ${DAMAI_NACOS_USERNAME:nacos}
+        password: ${DAMAI_NACOS_PASSWORD:nacos}
+        namespace: ${DAMAI_NACOS_NAMESPACE:}
+        group: ${DAMAI_NACOS_CONFIG_GROUP:DEFAULT_GROUP}
+        file-extension: yml
       discovery:
         enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
         register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
-        server-addr: localhost:8848
-        username: nacos
-        password: nacos
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:localhost:8848}
+        username: ${DAMAI_NACOS_USERNAME:nacos}
+        password: ${DAMAI_NACOS_PASSWORD:nacos}
+        namespace: ${DAMAI_NACOS_NAMESPACE:}
         service: ${spring.application.name}
         group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
   sql:
@@ -34,6 +47,14 @@ mybatis:
 damai:
   pay:
     order-service-url: ${DAMAI_ORDER_SERVICE_URL:http://damai-order-service}
+    event:
+      compensation-enabled: ${DAMAI_PAY_EVENT_COMPENSATION_ENABLED:true}
+      scan-delay-millis: ${DAMAI_PAY_EVENT_SCAN_DELAY_MILLIS:30000}
+      scan-limit: ${DAMAI_PAY_EVENT_SCAN_LIMIT:100}
+      max-retry-count: ${DAMAI_PAY_EVENT_MAX_RETRY_COUNT:5}
+      retry-base-delay-seconds: ${DAMAI_PAY_EVENT_RETRY_BASE_DELAY_SECONDS:30}
+      retry-max-delay-seconds: ${DAMAI_PAY_EVENT_RETRY_MAX_DELAY_SECONDS:300}
+      processing-timeout-seconds: ${DAMAI_PAY_EVENT_PROCESSING_TIMEOUT_SECONDS:120}
     alipay:
       enabled: ${DAMAI_ALIPAY_ENABLED:false}
       gateway-url: ${DAMAI_ALIPAY_GATEWAY_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}

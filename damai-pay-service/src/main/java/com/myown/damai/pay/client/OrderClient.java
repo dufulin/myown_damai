@@ -2,6 +2,7 @@ package com.myown.damai.pay.client;
 
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.exception.BusinessException;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.pay.dto.OrderPayRequest;
 import com.myown.damai.pay.dto.OrderSnapshot;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,9 +38,10 @@ public class OrderClient {
     /**
      * Loads one order by order number.
      */
-    public OrderSnapshot getOrder(Long orderNumber) {
+    public OrderSnapshot getOrder(Long orderNumber, Long authenticatedUserId) {
         ApiResponse<OrderSnapshot> response = webClient.get()
                 .uri(orderServiceUrl + "/api/orders/{orderNumber}", orderNumber)
+                .header(AuthenticatedUserHeader.USER_ID, String.valueOf(authenticatedUserId))
                 .retrieve()
                 .bodyToMono(ORDER_RESPONSE_TYPE)
                 .block();

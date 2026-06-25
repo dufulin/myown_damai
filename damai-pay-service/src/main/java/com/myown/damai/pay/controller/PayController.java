@@ -1,16 +1,23 @@
 package com.myown.damai.pay.controller;
 
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.pay.dto.PagePayRequest;
 import com.myown.damai.pay.dto.PagePayResponse;
+import com.myown.damai.pay.dto.PayEventCompensateResponse;
+import com.myown.damai.pay.dto.PayOrderEventResponse;
+import com.myown.damai.pay.service.PayOrderEventService;
 import com.myown.damai.pay.service.PayService;
 import jakarta.validation.Valid;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,21 +32,27 @@ public class PayController {
     private static final Logger LOGGER = LoggerFactory.getLogger(PayController.class);
 
     private final PayService payService;
+    private final PayOrderEventService payOrderEventService;
 
     /**
      * Creates the controller with payment business operations.
      */
-    public PayController(PayService payService) {
+    public PayController(PayService payService, PayOrderEventService payOrderEventService) {
         this.payService = payService;
+        this.payOrderEventService = payOrderEventService;
     }
 
     /**
-     * Creates a mock Alipay payment and marks one order as paid.
+     * Creates a mock Alipay payment and records an asynchronous order notification event.
      */
     @PostMapping("/alipay/page-pay")
-    public ApiResponse<PagePayResponse> createAlipayPagePay(@Valid @RequestBody PagePayRequest request) {
-        LOGGER.info("mock alipay pay request received, orderNumber={}, userId={}", request.orderNumber(), request.userId());
-        PagePayResponse response = payService.createAlipayPagePay(request);
+    public ApiResponse<PagePayResponse> createAlipayPagePay(
+            @RequestHeader(AuthenticatedUserHeader.USER_ID) String userIdHeader,
+            @Valid @RequestBody PagePayRequest request
+    ) {
+        Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        LOGGER.info("mock alipay pay request received, orderNumber={}, userId={}", request.orderNumber(), authenticatedUserId);
+        PagePayResponse response = payService.createAlipayPagePay(request, authenticatedUserId);
         LOGGER.info("mock alipay pay request succeeded, orderNumber={}, payBillId={}", request.orderNumber(), response.payBillId());
         return ApiResponse.success(response);
     }
@@ -58,5 +71,38 @@ public class PayController {
             LOGGER.warn("alipay notify request failed", exception);
             return "failure";
         }
+    }
+
+    /**
+     * Manually compensates due payment events.
+     */
+    @PostMapping("/events/compensate")
+    public ApiResponse<PayEventCompensateResponse> compensatePayEvents() {
+        LOGGER.info("pay event compensate request received");
+        int processedCount = payOrderEventService.compensateDueEvents();
+        LOGGER.info("pay event compensate request succeeded, processedCount={}", processedCount);
+        return ApiResponse.success(new PayEventCompensateResponse(processedCount));
+    }
+
+    /**
+     * Manually retries one payment event by event key.
+     */
+    @PostMapping("/events/{eventKey}/retry")
+    public ApiResponse<PayEventCompensateResponse> retryPayEvent(@PathVariable String eventKey) {
+        LOGGER.info("pay event retry request received, eventKey={}", eventKey);
+        int processedCount = payOrderEventService.manualRetry(eventKey);
+        LOGGER.info("pay event retry request succeeded, eventKey={}, processedCount={}", eventKey, processedCount);
+        return ApiResponse.success(new PayEventCompensateResponse(processedCount));
+    }
+
+    /**
+     * Gets one payment event status by event key.
+     */
+    @GetMapping("/events/{eventKey}")
+    public ApiResponse<PayOrderEventResponse> getPayEvent(@PathVariable String eventKey) {
+        LOGGER.info("pay event detail request received, eventKey={}", eventKey);
+        PayOrderEventResponse response = payOrderEventService.getEvent(eventKey);
+        LOGGER.info("pay event detail request succeeded, eventKey={}, status={}", eventKey, response.eventStatusName());
+        return ApiResponse.success(response);
     }
 }

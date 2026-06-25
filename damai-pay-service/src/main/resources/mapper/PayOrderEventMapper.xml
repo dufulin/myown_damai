@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.pay.mapper.PayOrderEventMapper">
+
+    <resultMap id="PayOrderEventResultMap" type="com.myown.damai.pay.entity.PayOrderEvent">
+        <id property="id" column="id"/>
+        <result property="eventKey" column="event_key"/>
+        <result property="outOrderNo" column="out_order_no"/>
+        <result property="orderNumber" column="order_number"/>
+        <result property="tradeNumber" column="trade_number"/>
+        <result property="payAmount" column="pay_amount"/>
+        <result property="payTime" column="pay_time"/>
+        <result property="eventType" column="event_type"/>
+        <result property="eventStatus" column="event_status"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="maxRetryCount" column="max_retry_count"/>
+        <result property="nextRetryTime" column="next_retry_time"/>
+        <result property="lastError" column="last_error"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="PayOrderEventColumns">
+        id, event_key, out_order_no, order_number, trade_number, pay_amount, pay_time,
+        event_type, event_status, retry_count, max_retry_count, next_retry_time,
+        last_error, create_time, edit_time, status
+    </sql>
+
+    <insert id="insert" parameterType="com.myown.damai.pay.entity.PayOrderEvent"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_pay_order_event
+            (event_key, out_order_no, order_number, trade_number, pay_amount, pay_time,
+             event_type, event_status, retry_count, max_retry_count, next_retry_time,
+             last_error, create_time, edit_time, status)
+        VALUES
+            (#{eventKey}, #{outOrderNo}, #{orderNumber}, #{tradeNumber}, #{payAmount}, #{payTime},
+             #{eventType}, #{eventStatus}, #{retryCount}, #{maxRetryCount}, #{nextRetryTime},
+             #{lastError}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectByEventKey" resultMap="PayOrderEventResultMap">
+        SELECT <include refid="PayOrderEventColumns"/>
+        FROM d_pay_order_event
+        WHERE event_key = #{eventKey}
+          AND status = 1
+    </select>
+
+    <select id="selectDueEvents" resultMap="PayOrderEventResultMap">
+        SELECT <include refid="PayOrderEventColumns"/>
+        FROM d_pay_order_event
+        WHERE event_status IN
+        <foreach collection="eventStatuses" item="eventStatus" open="(" separator="," close=")">
+            #{eventStatus}
+        </foreach>
+          AND next_retry_time &lt;= #{now}
+          AND status = 1
+        ORDER BY next_retry_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="tryMarkProcessing">
+        UPDATE d_pay_order_event
+        SET event_status = #{processingStatus},
+            edit_time = #{now}
+        WHERE event_key = #{eventKey}
+          AND event_status IN
+          <foreach collection="eventStatuses" item="eventStatus" open="(" separator="," close=")">
+              #{eventStatus}
+          </foreach>
+          AND next_retry_time &lt;= #{now}
+          AND status = 1
+    </update>
+
+    <update id="resetStuckProcessing">
+        UPDATE d_pay_order_event
+        SET event_status = #{retryingStatus},
+            next_retry_time = #{now},
+            edit_time = #{now}
+        WHERE event_status = #{processingStatus}
+          AND edit_time &lt;= #{deadline}
+          AND status = 1
+    </update>
+
+    <update id="markSucceeded">
+        UPDATE d_pay_order_event
+        SET event_status = #{succeededStatus},
+            last_error = NULL,
+            edit_time = #{now}
+        WHERE event_key = #{eventKey}
+          AND status = 1
+    </update>
+
+    <update id="markRetrying">
+        UPDATE d_pay_order_event
+        SET event_status = #{retryingStatus},
+            retry_count = #{retryCount},
+            next_retry_time = #{nextRetryTime},
+            last_error = #{lastError},
+            edit_time = #{now}
+        WHERE event_key = #{eventKey}
+          AND status = 1
+    </update>
+
+    <update id="markDead">
+        UPDATE d_pay_order_event
+        SET event_status = #{deadStatus},
+            retry_count = #{retryCount},
+            last_error = #{lastError},
+            edit_time = #{now}
+        WHERE event_key = #{eventKey}
+          AND status = 1
+    </update>
+</mapper>

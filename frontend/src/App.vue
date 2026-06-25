@@ -493,7 +493,6 @@ async function createOrder() {
     const body = {
       programId: selectedProgram.value.id,
       programItemPicture: selectedProgram.value.itemPicture,
-      userId: currentUser.value.id,
       programTitle: selectedProgram.value.title,
       programPlace: selectedProgram.value.place,
       programShowTime: selectedShowTime.value.showTime,
@@ -598,7 +597,6 @@ async function loadOrders() {
   orderListLoading.value = true
   try {
     const params = new URLSearchParams({
-      userId: String(currentUser.value.id),
       pageNumber: String(orderPageNumber.value),
       pageSize: String(orderPageSize)
     })
@@ -640,8 +638,7 @@ async function payOrder(order) {
     const result = await request('/api/pay/alipay/page-pay', {
       method: 'POST',
       body: JSON.stringify({
-        orderNumber: order.orderNumber,
-        userId: currentUser.value.id
+        orderNumber: order.orderNumber
       })
     })
     setNotice('success', `模拟支付成功：${result.data.payNumber}`)
