@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.order.mapper.OrderAsyncMessageMapper">
+
+    <resultMap id="OrderAsyncMessageResultMap" type="com.myown.damai.order.entity.OrderAsyncMessage">
+        <id property="id" column="id"/>
+        <result property="messageKey" column="message_key"/>
+        <result property="orderNumber" column="order_number"/>
+        <result property="userId" column="user_id"/>
+        <result property="programId" column="program_id"/>
+        <result property="topic" column="topic"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="maxRetryCount" column="max_retry_count"/>
+        <result property="messageStatus" column="message_status"/>
+        <result property="payload" column="payload"/>
+        <result property="lastError" column="last_error"/>
+        <result property="createdAt" column="create_time"/>
+        <result property="updatedAt" column="edit_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="OrderAsyncMessageColumns">
+        id, message_key, order_number, user_id, program_id, topic, retry_count,
+        max_retry_count, message_status, payload, last_error, create_time, edit_time, status
+    </sql>
+
+    <insert id="insertMessage" parameterType="com.myown.damai.order.entity.OrderAsyncMessage"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_order_async_message
+            (message_key, order_number, user_id, program_id, topic, retry_count,
+             max_retry_count, message_status, payload, last_error, create_time, edit_time, status)
+        VALUES
+            (#{messageKey}, #{orderNumber}, #{userId}, #{programId}, #{topic}, #{retryCount},
+             #{maxRetryCount}, #{messageStatus}, #{payload}, #{lastError}, #{createdAt}, #{updatedAt}, #{status})
+    </insert>
+
+    <select id="selectByMessageKey" resultMap="OrderAsyncMessageResultMap">
+        SELECT <include refid="OrderAsyncMessageColumns"/>
+        FROM d_order_async_message
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </select>
+
+    <select id="selectLatestByOrderNumber" resultMap="OrderAsyncMessageResultMap">
+        SELECT <include refid="OrderAsyncMessageColumns"/>
+        FROM d_order_async_message
+        WHERE order_number = #{orderNumber}
+          AND status = 1
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <update id="markSent">
+        UPDATE d_order_async_message
+        SET message_status = #{sentStatus},
+            topic = #{topic},
+            last_error = NULL,
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </update>
+
+    <update id="markSendFailed">
+        UPDATE d_order_async_message
+        SET message_status = #{sendFailedStatus},
+            last_error = #{lastError},
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </update>
+
+    <update id="tryMarkConsuming">
+        UPDATE d_order_async_message
+        SET message_status = #{consumingStatus},
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND message_status IN
+          <foreach collection="fromStatuses" item="fromStatus" open="(" separator="," close=")">
+              #{fromStatus}
+          </foreach>
+          AND status = 1
+    </update>
+
+    <update id="markSucceeded">
+        UPDATE d_order_async_message
+        SET message_status = #{succeededStatus},
+            last_error = NULL,
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </update>
+
+    <update id="markRetrying">
+        UPDATE d_order_async_message
+        SET message_status = #{retryingStatus},
+            retry_count = #{retryCount},
+            last_error = #{lastError},
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </update>
+
+    <update id="markDead">
+        UPDATE d_order_async_message
+        SET message_status = #{deadStatus},
+            retry_count = #{retryCount},
+            last_error = #{lastError},
+            edit_time = #{now}
+        WHERE message_key = #{messageKey}
+          AND status = 1
+    </update>
+</mapper>

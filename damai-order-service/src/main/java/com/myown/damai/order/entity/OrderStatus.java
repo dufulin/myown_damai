@@ -4,14 +4,16 @@ import com.myown.damai.common.exception.BusinessException;
 import org.springframework.http.HttpStatus;
 
 /**
- * Defines stable order status codes used by the order tables.
+ * Defines stable order lifecycle status codes used by order tables and the order state machine.
  */
 public enum OrderStatus {
 
-    UNPAID(1),
+    PENDING_CREATE(0),
+    PENDING_PAYMENT(1),
     CANCELED(2),
     PAID(3),
-    REFUNDED(4);
+    REFUNDED(4),
+    TIMEOUT(5);
 
     private final int code;
 
@@ -27,6 +29,13 @@ public enum OrderStatus {
      */
     public int code() {
         return code;
+    }
+
+    /**
+     * Returns whether this status is a terminal order lifecycle state.
+     */
+    public boolean terminal() {
+        return CANCELED.equals(this) || REFUNDED.equals(this) || TIMEOUT.equals(this);
     }
 
     /**

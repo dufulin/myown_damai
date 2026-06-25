@@ -10,6 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.order.dao.OrderAsyncMessageDao;
+import com.myown.damai.order.entity.OrderAsyncMessage;
+import com.myown.damai.order.entity.OrderAsyncMessageStatus;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -35,6 +39,9 @@ class OrderControllerTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private OrderAsyncMessageDao orderAsyncMessageDao;
 
     /**
      * Verifies creating, querying, listing, and manually canceling one unpaid order.
@@ -82,8 +89,9 @@ class OrderControllerTest {
 
         mockMvc.perform(get("/api/orders/{orderNumber}", orderNumber))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.orderStatus").value(2))
-                .andExpect(jsonPath("$.data.ticketUsers[0].orderStatus").value(2));
+                .andExpect(jsonPath("$.data.orderStatus").value(5))
+                .andExpect(jsonPath("$.data.orderStatusName").value("TIMEOUT"))
+                .andExpect(jsonPath("$.data.ticketUsers[0].orderStatus").value(5));
     }
 
     /**
@@ -109,6 +117,28 @@ class OrderControllerTest {
     }
 
     /**
+     * Verifies a timeout order cannot be overwritten by a later payment confirmation.
+     */
+    @Test
+    void timeoutOrderCannotBePaid() throws Exception {
+        Long orderNumber = createOrder(10006L);
+
+        mockMvc.perform(post("/api/orders/timeout-cancel"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/orders/{orderNumber}/paid", orderNumber)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "tradeNumber": "2026061622001000000000000002",
+                                  "payAmount": 1360,
+                                  "payTime": "2026-06-16T12:00:00Z"
+                                }
+                                """))
+                .andExpect(status().isConflict());
+    }
+
+    /**
      * Verifies repeated user-program order creation returns the existing order number.
      */
     @Test
@@ -125,6 +155,24 @@ class OrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].orderNumber").value(firstOrderNumber));
+    }
+
+    /**
+     * Verifies async message status can be tracked by order number.
+     */
+    @Test
+    void getAsyncMessageStatus() throws Exception {
+        Long orderNumber = 99001001L;
+        OrderAsyncMessage message = buildAsyncMessage(orderNumber);
+        orderAsyncMessageDao.saveMessage(message);
+        orderAsyncMessageDao.markSent(message.messageKey, message.topic);
+
+        mockMvc.perform(get("/api/orders/{orderNumber}/async-message", orderNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.messageKey").value(message.messageKey))
+                .andExpect(jsonPath("$.data.orderNumber").value(orderNumber))
+                .andExpect(jsonPath("$.data.messageStatus").value(OrderAsyncMessageStatus.SENT.code()))
+                .andExpect(jsonPath("$.data.messageStatusName").value("SENT"));
     }
 
     /**
@@ -169,5 +217,26 @@ class OrderControllerTest {
                 .andReturn();
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
         return json.path("data").path("orderNumber").asLong();
+    }
+
+    /**
+     * Builds one async message entity for status tracking tests.
+     */
+    private OrderAsyncMessage buildAsyncMessage(Long orderNumber) {
+        Instant now = Instant.now();
+        OrderAsyncMessage message = new OrderAsyncMessage();
+        message.messageKey = "order-create:" + orderNumber;
+        message.orderNumber = orderNumber;
+        message.userId = 10005L;
+        message.programId = 20001L;
+        message.topic = "damai-order-create-test";
+        message.retryCount = 0;
+        message.maxRetryCount = 3;
+        message.messageStatus = OrderAsyncMessageStatus.INIT.code();
+        message.payload = "{}";
+        message.createdAt = now;
+        message.updatedAt = now;
+        message.status = 1;
+        return message;
     }
 }

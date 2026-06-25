@@ -122,42 +122,36 @@
         ORDER BY id ASC
     </select>
 
-    <update id="cancelUnpaidOrder">
+    <update id="transitionOrderStatus">
         UPDATE d_order
-        SET order_status = #{canceledStatus},
-            cancel_order_time = #{now},
-            edit_time = #{now}
-        WHERE order_number = #{orderNumber}
-          AND order_status = #{unpaidStatus}
+        SET order_status = #{transition.toStatusCode},
+            edit_time = #{transition.eventTime}
+            <if test="transition.writeCancelTime">
+                , cancel_order_time = #{transition.eventTime}
+            </if>
+            <if test="transition.writePayTime">
+                , pay_order_time = #{transition.eventTime}
+            </if>
+        WHERE order_number = #{transition.orderNumber}
+          AND order_status = #{transition.fromStatusCode}
           AND status = 1
     </update>
 
-    <update id="cancelTicketUsersByOrderNumber">
+    <update id="transitionTicketUsersStatus">
         UPDATE d_order_ticket_user
-        SET order_status = #{canceledStatus},
-            cancel_order_time = #{now},
-            edit_time = #{now}
-        WHERE order_number = #{orderNumber}
-          AND status = 1
-    </update>
-
-    <update id="payUnpaidOrder">
-        UPDATE d_order
-        SET order_status = #{paidStatus},
-            pay_order_time = #{payTime},
-            edit_time = #{payTime}
-        WHERE order_number = #{orderNumber}
-          AND order_status = #{unpaidStatus}
-          AND status = 1
-    </update>
-
-    <update id="payTicketUsersByOrderNumber">
-        UPDATE d_order_ticket_user
-        SET order_status = #{paidStatus},
-            pay_order_price = order_price,
-            pay_order_time = #{payTime},
-            edit_time = #{payTime}
-        WHERE order_number = #{orderNumber}
+        SET order_status = #{transition.toStatusCode},
+            edit_time = #{transition.eventTime}
+            <if test="transition.writeCancelTime">
+                , cancel_order_time = #{transition.eventTime}
+            </if>
+            <if test="transition.writePayTime">
+                , pay_order_time = #{transition.eventTime}
+            </if>
+            <if test="transition.copyPayPrice">
+                , pay_order_price = order_price
+            </if>
+        WHERE order_number = #{transition.orderNumber}
+          AND order_status = #{transition.fromStatusCode}
           AND status = 1
     </update>
 

@@ -27,6 +27,8 @@ public class OrderAsyncProducer {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final String createTopic;
+    private final String retryTopic;
+    private final String deadTopic;
     private final long sendTimeoutSeconds;
 
     /**
@@ -36,11 +38,15 @@ public class OrderAsyncProducer {
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
             @Value("${damai.order.async.create-topic:damai-order-create}") String createTopic,
+            @Value("${damai.order.async.retry-topic:damai-order-create-retry}") String retryTopic,
+            @Value("${damai.order.async.dead-topic:damai-order-create-dead}") String deadTopic,
             @Value("${damai.order.async.send-timeout-seconds:10}") long sendTimeoutSeconds
     ) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.createTopic = createTopic;
+        this.retryTopic = retryTopic;
+        this.deadTopic = deadTopic;
         this.sendTimeoutSeconds = sendTimeoutSeconds;
     }
 
@@ -50,19 +56,44 @@ public class OrderAsyncProducer {
     public void sendCreateOrderMessage(OrderAsyncCreateMessage message) {
         try {
             String payload = objectMapper.writeValueAsString(message);
-            kafkaTemplate.send(createTopic, String.valueOf(message.orderNumber()), payload).get(sendTimeoutSeconds, TimeUnit.SECONDS);
-            LOGGER.info("order async create message sent, topic={}, orderNumber={}", createTopic, message.orderNumber());
+            sendPayload(createTopic, message.messageKey(), payload);
+            LOGGER.info("order async create message sent, topic={}, messageKey={}, orderNumber={}", createTopic, message.messageKey(), message.orderNumber());
         } catch (JsonProcessingException exception) {
             throw new BusinessException("ORDER_ASYNC_MESSAGE_INVALID", "order async message serialization failed", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Sends one failed order creation message to the retry topic.
+     */
+    public void sendRetryOrderMessage(String messageKey, String payload) {
+        sendPayload(retryTopic, messageKey, payload);
+        LOGGER.info("order async retry message sent, topic={}, messageKey={}", retryTopic, messageKey);
+    }
+
+    /**
+     * Sends one exhausted or invalid order creation message to the dead-letter topic.
+     */
+    public void sendDeadLetterMessage(String messageKey, String payload) {
+        sendPayload(deadTopic, messageKey, payload);
+        LOGGER.info("order async dead-letter message sent, topic={}, messageKey={}", deadTopic, messageKey);
+    }
+
+    /**
+     * Sends one serialized payload to Kafka and waits for broker acknowledgement.
+     */
+    private void sendPayload(String topic, String messageKey, String payload) {
+        try {
+            kafkaTemplate.send(topic, messageKey, payload).get(sendTimeoutSeconds, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("order async create message send interrupted, topic={}, orderNumber={}", createTopic, message.orderNumber(), exception);
+            LOGGER.warn("order async message send interrupted, topic={}, messageKey={}", topic, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_INTERRUPTED", "order async message send interrupted", HttpStatus.SERVICE_UNAVAILABLE);
         } catch (ExecutionException | TimeoutException exception) {
-            LOGGER.warn("order async create message send failed, topic={}, orderNumber={}", createTopic, message.orderNumber(), exception);
+            LOGGER.warn("order async message send failed, topic={}, messageKey={}", topic, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_FAILED", "order async message send failed", HttpStatus.SERVICE_UNAVAILABLE);
         } catch (RuntimeException exception) {
-            LOGGER.warn("order async create message send failed, topic={}, orderNumber={}", createTopic, message.orderNumber(), exception);
+            LOGGER.warn("order async message send failed, topic={}, messageKey={}", topic, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_FAILED", "order async message send failed", HttpStatus.SERVICE_UNAVAILABLE);
         }
     }

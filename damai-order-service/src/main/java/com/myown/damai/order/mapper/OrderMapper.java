@@ -2,6 +2,7 @@ package com.myown.damai.order.mapper;
 
 import com.myown.damai.order.entity.Order;
 import com.myown.damai.order.entity.OrderTicketUser;
+import com.myown.damai.order.state.OrderStateTransition;
 import java.time.Instant;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -52,42 +53,14 @@ public interface OrderMapper {
     List<OrderTicketUser> selectTicketUsersByOrderNumber(@Param("orderNumber") Long orderNumber);
 
     /**
-     * Cancels an unpaid order.
+     * Atomically transitions an order only when it still has the expected source status.
      */
-    int cancelUnpaidOrder(
-            @Param("orderNumber") Long orderNumber,
-            @Param("now") Instant now,
-            @Param("unpaidStatus") int unpaidStatus,
-            @Param("canceledStatus") int canceledStatus
-    );
+    int transitionOrderStatus(@Param("transition") OrderStateTransition transition);
 
     /**
-     * Updates ticket-user rows to canceled for one order.
+     * Transitions ticket-user rows after their master order transition succeeds.
      */
-    int cancelTicketUsersByOrderNumber(
-            @Param("orderNumber") Long orderNumber,
-            @Param("now") Instant now,
-            @Param("canceledStatus") int canceledStatus
-    );
-
-    /**
-     * Marks one unpaid order as paid.
-     */
-    int payUnpaidOrder(
-            @Param("orderNumber") Long orderNumber,
-            @Param("payTime") Instant payTime,
-            @Param("unpaidStatus") int unpaidStatus,
-            @Param("paidStatus") int paidStatus
-    );
-
-    /**
-     * Marks ticket-user rows as paid for one order.
-     */
-    int payTicketUsersByOrderNumber(
-            @Param("orderNumber") Long orderNumber,
-            @Param("payTime") Instant payTime,
-            @Param("paidStatus") int paidStatus
-    );
+    int transitionTicketUsersStatus(@Param("transition") OrderStateTransition transition);
 
     /**
      * Lists expired unpaid order numbers.

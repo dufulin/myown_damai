@@ -26,4 +26,30 @@ public class OrderKafkaConfig {
                 .replicas(1)
                 .build();
     }
+
+    /**
+     * Creates the retry topic for failed asynchronous order creation messages.
+     */
+    @Bean
+    public NewTopic orderCreateRetryTopic(
+            @Value("${damai.order.async.retry-topic:damai-order-create-retry}") String topicName
+    ) {
+        return TopicBuilder.name(topicName)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    /**
+     * Creates the dead-letter topic for exhausted asynchronous order creation messages.
+     */
+    @Bean
+    public NewTopic orderCreateDeadTopic(
+            @Value("${damai.order.async.dead-topic:damai-order-create-dead}") String topicName
+    ) {
+        return TopicBuilder.name(topicName)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
 }

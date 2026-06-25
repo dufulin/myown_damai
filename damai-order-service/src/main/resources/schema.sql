@@ -52,3 +52,24 @@ CREATE TABLE IF NOT EXISTS d_order_ticket_user (
     INDEX idx_d_order_ticket_user_ticket_user_id (ticket_user_id),
     INDEX idx_d_order_ticket_user_create_order_time (create_order_time)
 );
+
+CREATE TABLE IF NOT EXISTS d_order_async_message (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    message_key VARCHAR(128) NOT NULL,
+    order_number BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    program_id BIGINT NOT NULL,
+    topic VARCHAR(128) NOT NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retry_count INT NOT NULL DEFAULT 3,
+    message_status INT NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL,
+    last_error VARCHAR(1024),
+    create_time DATETIME(6) NOT NULL,
+    edit_time DATETIME(6) NOT NULL,
+    status TINYINT NOT NULL DEFAULT 1,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_d_order_async_message_key UNIQUE (message_key),
+    INDEX idx_d_order_async_message_order_number (order_number),
+    INDEX idx_d_order_async_message_status (message_status, edit_time)
+);

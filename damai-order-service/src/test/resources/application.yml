@@ -34,6 +34,9 @@ damai:
     async:
       enabled: false
       create-topic: damai-order-create-test
+      retry-topic: damai-order-create-retry-test
+      dead-topic: damai-order-create-dead-test
+      max-retry-count: 3
     inventory:
       enabled: false
     lock:

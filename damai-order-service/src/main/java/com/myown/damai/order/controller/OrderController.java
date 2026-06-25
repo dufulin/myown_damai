@@ -1,6 +1,7 @@
 package com.myown.damai.order.controller;
 
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.order.dto.OrderAsyncMessageResponse;
 import com.myown.damai.order.dto.OrderCancelRequest;
 import com.myown.damai.order.dto.OrderCreateRequest;
 import com.myown.damai.order.dto.OrderPayRequest;
@@ -58,6 +59,17 @@ public class OrderController {
         LOGGER.info("order detail request received, orderNumber={}", orderNumber);
         OrderResponse response = orderService.getOrder(orderNumber);
         LOGGER.info("order detail request succeeded, orderNumber={}", orderNumber);
+        return ApiResponse.success(response);
+    }
+
+    /**
+     * Gets asynchronous order creation message status by order number.
+     */
+    @GetMapping("/{orderNumber}/async-message")
+    public ApiResponse<OrderAsyncMessageResponse> getAsyncMessage(@PathVariable Long orderNumber) {
+        LOGGER.info("order async message status request received, orderNumber={}", orderNumber);
+        OrderAsyncMessageResponse response = orderService.getAsyncMessage(orderNumber);
+        LOGGER.info("order async message status request succeeded, orderNumber={}, status={}", orderNumber, response.messageStatusName());
         return ApiResponse.success(response);
     }
 

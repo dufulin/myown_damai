@@ -3,6 +3,7 @@ package com.myown.damai.order.dao;
 import com.myown.damai.order.entity.Order;
 import com.myown.damai.order.entity.OrderTicketUser;
 import com.myown.damai.order.mapper.OrderMapper;
+import com.myown.damai.order.state.OrderStateTransition;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -62,23 +63,13 @@ public class OrderDaoImpl implements OrderDao {
     }
 
     @Override
-    public boolean cancelUnpaidOrder(Long orderNumber, Instant now, int unpaidStatus, int canceledStatus) {
-        return orderMapper.cancelUnpaidOrder(orderNumber, now, unpaidStatus, canceledStatus) > 0;
+    public boolean transitionOrderStatus(OrderStateTransition transition) {
+        return orderMapper.transitionOrderStatus(transition) > 0;
     }
 
     @Override
-    public void cancelTicketUsers(Long orderNumber, Instant now, int canceledStatus) {
-        orderMapper.cancelTicketUsersByOrderNumber(orderNumber, now, canceledStatus);
-    }
-
-    @Override
-    public boolean payUnpaidOrder(Long orderNumber, Instant payTime, int unpaidStatus, int paidStatus) {
-        return orderMapper.payUnpaidOrder(orderNumber, payTime, unpaidStatus, paidStatus) > 0;
-    }
-
-    @Override
-    public void payTicketUsers(Long orderNumber, Instant payTime, int paidStatus) {
-        orderMapper.payTicketUsersByOrderNumber(orderNumber, payTime, paidStatus);
+    public void transitionTicketUsersStatus(OrderStateTransition transition) {
+        orderMapper.transitionTicketUsersStatus(transition);
     }
 
     @Override

@@ -1,21 +1,28 @@
 package com.myown.damai.order.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.order.client.ProgramInventoryClient;
 import com.myown.damai.order.client.ProgramInventoryItemRequest;
 import com.myown.damai.order.client.ProgramInventoryRequest;
+import com.myown.damai.order.dao.OrderAsyncMessageDao;
 import com.myown.damai.order.dao.OrderDao;
 import com.myown.damai.order.dto.OrderAsyncCreateMessage;
+import com.myown.damai.order.dto.OrderAsyncMessageResponse;
 import com.myown.damai.order.dto.OrderCreateRequest;
 import com.myown.damai.order.dto.OrderPayRequest;
 import com.myown.damai.order.dto.OrderResponse;
 import com.myown.damai.order.dto.OrderTicketUserRequest;
 import com.myown.damai.order.dto.OrderTicketUserResponse;
 import com.myown.damai.order.entity.Order;
+import com.myown.damai.order.entity.OrderAsyncMessage;
+import com.myown.damai.order.entity.OrderAsyncMessageStatus;
 import com.myown.damai.order.entity.OrderStatus;
 import com.myown.damai.order.entity.OrderTicketUser;
 import com.myown.damai.order.lock.OrderLockExecutor;
 import com.myown.damai.order.messaging.OrderAsyncProducer;
+import com.myown.damai.order.state.OrderStateMachine;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -51,16 +58,20 @@ public class OrderService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int EXPIRED_SCAN_LIMIT = 200;
     private static final String ASYNC_PENDING_KEY_PREFIX = "damai:order:async:pending:user:";
+    private static final String ASYNC_MESSAGE_KEY_PREFIX = "order-create:";
     private static final List<Integer> IDEMPOTENT_ORDER_STATUSES = Arrays.asList(
-            OrderStatus.UNPAID.code(),
+            OrderStatus.PENDING_PAYMENT.code(),
             OrderStatus.PAID.code()
     );
     private static final AtomicInteger ORDER_SEQUENCE = new AtomicInteger(ThreadLocalRandom.current().nextInt(1000));
 
     private final OrderDao orderDao;
+    private final OrderAsyncMessageDao orderAsyncMessageDao;
     private final OrderLockExecutor orderLockExecutor;
+    private final OrderStateMachine orderStateMachine;
     private final TransactionTemplate transactionTemplate;
     private final ProgramInventoryClient programInventoryClient;
+    private final ObjectMapper objectMapper;
     private final ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider;
     private final ObjectProvider<RedissonClient> redissonClientProvider;
     private final Map<String, Long> localPendingOrders = new ConcurrentHashMap<>();
@@ -68,32 +79,44 @@ public class OrderService {
     private final boolean asyncEnabled;
     private final boolean inventoryEnabled;
     private final boolean timeoutScanEnabled;
+    private final int asyncMaxRetryCount;
+    private final String asyncCreateTopic;
 
     /**
      * Creates the order service with persistence and timeout settings.
      */
     public OrderService(
             OrderDao orderDao,
+            OrderAsyncMessageDao orderAsyncMessageDao,
             OrderLockExecutor orderLockExecutor,
+            OrderStateMachine orderStateMachine,
             TransactionTemplate transactionTemplate,
             ProgramInventoryClient programInventoryClient,
+            ObjectMapper objectMapper,
             ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider,
             ObjectProvider<RedissonClient> redissonClientProvider,
             @Value("${damai.order.timeout-minutes:15}") long timeoutMinutes,
             @Value("${damai.order.async.enabled:false}") boolean asyncEnabled,
             @Value("${damai.order.inventory.enabled:true}") boolean inventoryEnabled,
-            @Value("${damai.order.timeout-scan-enabled:true}") boolean timeoutScanEnabled
+            @Value("${damai.order.timeout-scan-enabled:true}") boolean timeoutScanEnabled,
+            @Value("${damai.order.async.max-retry-count:3}") int asyncMaxRetryCount,
+            @Value("${damai.order.async.create-topic:damai-order-create}") String asyncCreateTopic
     ) {
         this.orderDao = orderDao;
+        this.orderAsyncMessageDao = orderAsyncMessageDao;
         this.orderLockExecutor = orderLockExecutor;
+        this.orderStateMachine = orderStateMachine;
         this.transactionTemplate = transactionTemplate;
         this.programInventoryClient = programInventoryClient;
+        this.objectMapper = objectMapper;
         this.orderAsyncProducerProvider = orderAsyncProducerProvider;
         this.redissonClientProvider = redissonClientProvider;
         this.orderTimeout = Duration.ofMinutes(timeoutMinutes);
         this.asyncEnabled = asyncEnabled;
         this.inventoryEnabled = inventoryEnabled;
         this.timeoutScanEnabled = timeoutScanEnabled;
+        this.asyncMaxRetryCount = asyncMaxRetryCount;
+        this.asyncCreateTopic = asyncCreateTopic;
     }
 
     /**
@@ -134,6 +157,14 @@ public class OrderService {
     }
 
     /**
+     * Clears the pending marker for one exhausted asynchronous order creation message.
+     */
+    public void clearAsyncPendingOrder(OrderAsyncCreateMessage message) {
+        removePendingOrder(message.request().userId(), message.request().programId(), message.orderNumber());
+        LOGGER.info("order async pending marker cleared, messageKey={}, orderNumber={}", message.messageKey(), message.orderNumber());
+    }
+
+    /**
      * Submits one order creation request to Kafka and returns its reserved order number.
      */
     private OrderResponse submitOrderAsync(OrderCreateRequest request) {
@@ -160,13 +191,18 @@ public class OrderService {
             }
 
             Long orderNumber = nextOrderNumber();
+            String messageKey = asyncMessageKey(orderNumber);
+            OrderAsyncCreateMessage message = new OrderAsyncCreateMessage(messageKey, orderNumber, request);
+            OrderAsyncMessage asyncMessage = buildAsyncMessage(message);
             putPendingOrder(request.userId(), request.programId(), orderNumber);
             try {
-                orderAsyncProducerProvider.getObject()
-                        .sendCreateOrderMessage(new OrderAsyncCreateMessage(orderNumber, request));
-                LOGGER.info("order async create submitted, orderNumber={}, userId={}", orderNumber, request.userId());
+                orderAsyncMessageDao.saveMessage(asyncMessage);
+                orderAsyncProducerProvider.getObject().sendCreateOrderMessage(message);
+                orderAsyncMessageDao.markSent(messageKey, asyncMessage.topic);
+                LOGGER.info("order async create submitted, messageKey={}, orderNumber={}, userId={}", messageKey, orderNumber, request.userId());
                 return buildSubmittedOrderResponse(request, orderNumber);
             } catch (RuntimeException exception) {
+                orderAsyncMessageDao.markSendFailed(messageKey, exception.getMessage());
                 removePendingOrder(request.userId(), request.programId(), orderNumber);
                 throw exception;
             }
@@ -221,6 +257,55 @@ public class OrderService {
      */
     private Optional<Order> findExistingOrder(Long userId, Long programId) {
         return orderDao.findExistingUserProgramOrder(userId, programId, IDEMPOTENT_ORDER_STATUSES);
+    }
+
+    /**
+     * Gets asynchronous order creation message tracking data by order number.
+     */
+    @Transactional(readOnly = true)
+    public OrderAsyncMessageResponse getAsyncMessage(Long orderNumber) {
+        OrderAsyncMessage message = orderAsyncMessageDao.findLatestByOrderNumber(orderNumber)
+                .orElseThrow(() -> new BusinessException("ORDER_ASYNC_MESSAGE_NOT_FOUND", "order async message not found", HttpStatus.NOT_FOUND));
+        return OrderAsyncMessageResponse.from(message);
+    }
+
+    /**
+     * Builds the unique asynchronous message key for one order number.
+     */
+    private String asyncMessageKey(Long orderNumber) {
+        return ASYNC_MESSAGE_KEY_PREFIX + orderNumber;
+    }
+
+    /**
+     * Builds the asynchronous message ledger row for a submitted order creation request.
+     */
+    private OrderAsyncMessage buildAsyncMessage(OrderAsyncCreateMessage message) {
+        Instant now = Instant.now();
+        OrderAsyncMessage asyncMessage = new OrderAsyncMessage();
+        asyncMessage.messageKey = message.messageKey();
+        asyncMessage.orderNumber = message.orderNumber();
+        asyncMessage.userId = message.request().userId();
+        asyncMessage.programId = message.request().programId();
+        asyncMessage.topic = asyncCreateTopic;
+        asyncMessage.retryCount = 0;
+        asyncMessage.maxRetryCount = asyncMaxRetryCount;
+        asyncMessage.messageStatus = OrderAsyncMessageStatus.INIT.code();
+        asyncMessage.payload = serializeAsyncMessage(message);
+        asyncMessage.createdAt = now;
+        asyncMessage.updatedAt = now;
+        asyncMessage.status = 1;
+        return asyncMessage;
+    }
+
+    /**
+     * Serializes one asynchronous order creation message for tracking.
+     */
+    private String serializeAsyncMessage(OrderAsyncCreateMessage message) {
+        try {
+            return objectMapper.writeValueAsString(message);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException("ORDER_ASYNC_MESSAGE_INVALID", "order async message serialization failed", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
@@ -354,9 +439,14 @@ public class OrderService {
         Instant now = Instant.now();
         BigDecimal orderPrice = calculateOrderPrice(request.ticketUsers());
         Order order = buildOrder(request, orderNumber, orderPrice, now);
+        order.orderStatus = OrderStatus.PENDING_CREATE.code();
         List<OrderTicketUserResponse> ticketUsers = request.ticketUsers()
                 .stream()
-                .map(item -> OrderTicketUserResponse.from(buildTicketUser(request, item, orderNumber, now)))
+                .map(item -> {
+                    OrderTicketUser ticketUser = buildTicketUser(request, item, orderNumber, now);
+                    ticketUser.orderStatus = OrderStatus.PENDING_CREATE.code();
+                    return OrderTicketUserResponse.from(ticketUser);
+                })
                 .toList();
         return OrderResponse.of(order, ticketUsers);
     }
@@ -390,22 +480,9 @@ public class OrderService {
     @Transactional
     public OrderResponse cancelOrder(Long orderNumber) {
         Order order = findOrderOrThrow(orderNumber);
-        if (!OrderStatus.UNPAID.equals(OrderStatus.fromCode(order.orderStatus))) {
-            LOGGER.warn("order cancel rejected because status is not unpaid, orderNumber={}, status={}", orderNumber, order.orderStatus);
-            throw new BusinessException("ORDER_STATUS_NOT_CANCELABLE", "only unpaid orders can be canceled", HttpStatus.CONFLICT);
-        }
         List<OrderTicketUser> ticketUsers = orderDao.listTicketUsers(orderNumber);
         Instant now = Instant.now();
-        boolean canceled = orderDao.cancelUnpaidOrder(
-                orderNumber,
-                now,
-                OrderStatus.UNPAID.code(),
-                OrderStatus.CANCELED.code()
-        );
-        if (!canceled) {
-            throw new BusinessException("ORDER_STATUS_NOT_CANCELABLE", "only unpaid orders can be canceled", HttpStatus.CONFLICT);
-        }
-        orderDao.cancelTicketUsers(orderNumber, now, OrderStatus.CANCELED.code());
+        orderStateMachine.cancel(order, now);
         releaseLockedInventory(order, ticketUsers);
         LOGGER.info("order canceled, orderNumber={}", orderNumber);
         return getOrder(orderNumber);
@@ -418,11 +495,11 @@ public class OrderService {
     public OrderResponse markOrderPaid(Long orderNumber, OrderPayRequest request) {
         Order order = findOrderOrThrow(orderNumber);
         OrderStatus currentStatus = OrderStatus.fromCode(order.orderStatus);
-        if (OrderStatus.PAID.equals(currentStatus)) {
+        if (orderStateMachine.alreadyInStatus(order, OrderStatus.PAID)) {
             LOGGER.info("order pay confirmation ignored because order already paid, orderNumber={}", orderNumber);
             return getOrder(orderNumber);
         }
-        if (!OrderStatus.UNPAID.equals(currentStatus)) {
+        if (!orderStateMachine.canTransit(currentStatus, OrderStatus.PAID)) {
             LOGGER.warn("order pay confirmation rejected because order is not unpaid, orderNumber={}, status={}", orderNumber, order.orderStatus);
             throw new BusinessException("ORDER_STATUS_NOT_PAYABLE", "only unpaid orders can be paid", HttpStatus.CONFLICT);
         }
@@ -432,11 +509,7 @@ public class OrderService {
         }
         List<OrderTicketUser> ticketUsers = orderDao.listTicketUsers(orderNumber);
         Instant payTime = request.payTime() == null ? Instant.now() : request.payTime();
-        boolean paid = orderDao.payUnpaidOrder(orderNumber, payTime, OrderStatus.UNPAID.code(), OrderStatus.PAID.code());
-        if (!paid) {
-            throw new BusinessException("ORDER_STATUS_NOT_PAYABLE", "only unpaid orders can be paid", HttpStatus.CONFLICT);
-        }
-        orderDao.payTicketUsers(orderNumber, payTime, OrderStatus.PAID.code());
+        orderStateMachine.pay(order, payTime);
         markLockedInventorySold(order, ticketUsers);
         LOGGER.info("order marked paid, orderNumber={}, tradeNumber={}", orderNumber, request.tradeNumber());
         return getOrder(orderNumber);
@@ -463,21 +536,18 @@ public class OrderService {
     @Transactional
     public int cancelTimeoutOrders() {
         Instant now = Instant.now();
-        List<Long> expiredOrderNumbers = orderDao.listExpiredUnpaidOrderNumbers(now, OrderStatus.UNPAID.code(), EXPIRED_SCAN_LIMIT);
+        List<Long> expiredOrderNumbers = orderDao.listExpiredUnpaidOrderNumbers(now, OrderStatus.PENDING_PAYMENT.code(), EXPIRED_SCAN_LIMIT);
         int canceledCount = 0;
         for (Long orderNumber : expiredOrderNumbers) {
             Optional<Order> foundOrder = orderDao.findOrderByOrderNumber(orderNumber);
-            List<OrderTicketUser> ticketUsers = orderDao.listTicketUsers(orderNumber);
-            boolean canceled = orderDao.cancelUnpaidOrder(
-                    orderNumber,
-                    now,
-                    OrderStatus.UNPAID.code(),
-                    OrderStatus.CANCELED.code()
-            );
-            if (canceled) {
-                orderDao.cancelTicketUsers(orderNumber, now, OrderStatus.CANCELED.code());
-                foundOrder.ifPresent(order -> releaseLockedInventory(order, ticketUsers));
-                canceledCount++;
+            if (foundOrder.isPresent()) {
+                Order order = foundOrder.get();
+                List<OrderTicketUser> ticketUsers = orderDao.listTicketUsers(orderNumber);
+                boolean timeout = orderStateMachine.timeout(order, now);
+                if (timeout) {
+                    releaseLockedInventory(order, ticketUsers);
+                    canceledCount++;
+                }
             }
         }
         return canceledCount;
@@ -500,7 +570,7 @@ public class OrderService {
         order.takeTicketMode = trimToNull(request.takeTicketMode());
         order.orderPrice = orderPrice;
         order.payOrderType = request.payOrderType();
-        order.orderStatus = OrderStatus.UNPAID.code();
+        order.orderStatus = OrderStatus.PENDING_PAYMENT.code();
         order.expireTime = now.plus(orderTimeout);
         order.createOrderTime = now;
         order.createdAt = now;
@@ -528,7 +598,7 @@ public class OrderService {
         ticketUser.ticketCategoryId = item.ticketCategoryId();
         ticketUser.orderPrice = item.orderPrice();
         ticketUser.payOrderType = request.payOrderType();
-        ticketUser.orderStatus = OrderStatus.UNPAID.code();
+        ticketUser.orderStatus = OrderStatus.PENDING_PAYMENT.code();
         ticketUser.createOrderTime = now;
         ticketUser.createdAt = now;
         ticketUser.updatedAt = now;

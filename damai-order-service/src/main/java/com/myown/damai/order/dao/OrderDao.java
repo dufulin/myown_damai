@@ -2,6 +2,7 @@ package com.myown.damai.order.dao;
 
 import com.myown.damai.order.entity.Order;
 import com.myown.damai.order.entity.OrderTicketUser;
+import com.myown.damai.order.state.OrderStateTransition;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -42,24 +43,14 @@ public interface OrderDao {
     List<OrderTicketUser> listTicketUsers(Long orderNumber);
 
     /**
-     * Cancels one unpaid order.
+     * Atomically transitions one order from the expected source status to the target status.
      */
-    boolean cancelUnpaidOrder(Long orderNumber, Instant now, int unpaidStatus, int canceledStatus);
+    boolean transitionOrderStatus(OrderStateTransition transition);
 
     /**
-     * Cancels ticket-user rows for one order.
+     * Transitions ticket-user rows together with their master order.
      */
-    void cancelTicketUsers(Long orderNumber, Instant now, int canceledStatus);
-
-    /**
-     * Marks one unpaid order as paid.
-     */
-    boolean payUnpaidOrder(Long orderNumber, Instant payTime, int unpaidStatus, int paidStatus);
-
-    /**
-     * Marks ticket-user rows as paid for one order.
-     */
-    void payTicketUsers(Long orderNumber, Instant payTime, int paidStatus);
+    void transitionTicketUsersStatus(OrderStateTransition transition);
 
     /**
      * Lists expired unpaid order numbers.

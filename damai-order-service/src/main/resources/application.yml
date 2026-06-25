@@ -62,7 +62,10 @@ damai:
     async:
       enabled: true
       create-topic: ${DAMAI_ORDER_CREATE_TOPIC:damai-order-create}
+      retry-topic: ${DAMAI_ORDER_CREATE_RETRY_TOPIC:damai-order-create-retry}
+      dead-topic: ${DAMAI_ORDER_CREATE_DEAD_TOPIC:damai-order-create-dead}
       send-timeout-seconds: ${DAMAI_ORDER_KAFKA_SEND_TIMEOUT_SECONDS:10}
+      max-retry-count: ${DAMAI_ORDER_ASYNC_MAX_RETRY_COUNT:3}
     inventory:
       enabled: ${DAMAI_ORDER_INVENTORY_ENABLED:true}
     lock:
