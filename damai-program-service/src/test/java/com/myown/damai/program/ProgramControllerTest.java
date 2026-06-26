@@ -108,6 +108,20 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.data.notices.entryRule").value("Enter with valid ticket and ID."))
                 .andExpect(jsonPath("$.data.ticketCategories[0].remainNumber").value(20));
 
+        mockMvc.perform(post("/api/programs/{programId}/ticket-categories/{ticketCategoryId}/price", programId, ticketCategoryId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "price": 720
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.price").value(720));
+
+        mockMvc.perform(get("/api/programs/{programId}", programId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ticketCategories[0].price").value(720));
+
         mockMvc.perform(post("/api/programs/{programId}/seats", programId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -159,6 +173,11 @@ class ProgramControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].sellStatus").value(3))
                 .andExpect(jsonPath("$.data[1].sellStatus").value(3));
+
+        mockMvc.perform(post("/api/programs/{programId}/offline", programId))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/programs/{programId}", programId))
+                .andExpect(status().isNotFound());
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.myown.damai.gateway.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.cache.DamaiCacheKey;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,7 +28,6 @@ import reactor.core.publisher.Mono;
 public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GatewayRateLimitFilter.class);
-    private static final String RATE_KEY_PREFIX = "damai:gateway:rate:";
 
     private final ReactiveStringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -155,7 +155,7 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
      * Builds a Redis key for the current fixed time window.
      */
     private String rateLimitKey(String clientIp) {
-        return RATE_KEY_PREFIX + clientIp + ":" + currentWindow();
+        return DamaiCacheKey.of("gateway", "rate", clientIp, currentWindow());
     }
 
     /**

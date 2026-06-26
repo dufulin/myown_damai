@@ -47,6 +47,14 @@ mybatis:
 damai:
   pay:
     order-service-url: ${DAMAI_ORDER_SERVICE_URL:http://damai-order-service}
+    order-client:
+      connect-timeout-millis: ${DAMAI_PAY_ORDER_CONNECT_TIMEOUT_MILLIS:1000}
+      response-timeout-millis: ${DAMAI_PAY_ORDER_RESPONSE_TIMEOUT_MILLIS:2000}
+      read-timeout-millis: ${DAMAI_PAY_ORDER_READ_TIMEOUT_MILLIS:2000}
+      write-timeout-millis: ${DAMAI_PAY_ORDER_WRITE_TIMEOUT_MILLIS:2000}
+      timeout-millis: ${DAMAI_PAY_ORDER_TIMEOUT_MILLIS:2500}
+      retry-count: ${DAMAI_PAY_ORDER_RETRY_COUNT:1}
+      retry-backoff-millis: ${DAMAI_PAY_ORDER_RETRY_BACKOFF_MILLIS:150}
     event:
       compensation-enabled: ${DAMAI_PAY_EVENT_COMPENSATION_ENABLED:true}
       scan-delay-millis: ${DAMAI_PAY_EVENT_SCAN_DELAY_MILLIS:30000}
@@ -64,3 +72,15 @@ damai:
       notify-url: ${DAMAI_ALIPAY_NOTIFY_URL:http://localhost:8080/api/pay/alipay/notify}
       return-url: ${DAMAI_ALIPAY_RETURN_URL:http://localhost:5173}
       verify-signature: ${DAMAI_ALIPAY_VERIFY_SIGNATURE:false}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      payOrderClient:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        ignore-exceptions:
+          - com.myown.damai.common.exception.BusinessException

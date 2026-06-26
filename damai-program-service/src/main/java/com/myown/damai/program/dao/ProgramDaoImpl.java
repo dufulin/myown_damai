@@ -8,6 +8,7 @@ import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
 import com.myown.damai.program.mapper.ProgramMapper;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -57,6 +58,14 @@ public class ProgramDaoImpl implements ProgramDao {
         return program;
     }
 
+    /**
+     * Marks one program as offline by updating its business status.
+     */
+    @Override
+    public boolean offlineProgram(Long programId) {
+        return programMapper.offlineProgram(programId, Instant.now()) > 0;
+    }
+
     @Override
     public Optional<Program> findProgramById(Long id) {
         return Optional.ofNullable(programMapper.selectProgramById(id));
@@ -100,6 +109,14 @@ public class ProgramDaoImpl implements ProgramDao {
         programMapper.insertTicketCategory(ticketCategory);
         Objects.requireNonNull(ticketCategory.id, "generated ticket category id must not be null");
         return ticketCategory;
+    }
+
+    /**
+     * Updates one ticket category price by delegating to MyBatis.
+     */
+    @Override
+    public boolean updateTicketCategoryPrice(Long programId, Long ticketCategoryId, BigDecimal price) {
+        return programMapper.updateTicketCategoryPrice(programId, ticketCategoryId, price, Instant.now()) > 0;
     }
 
     @Override

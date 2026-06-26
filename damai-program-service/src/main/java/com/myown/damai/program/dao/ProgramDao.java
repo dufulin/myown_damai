@@ -41,6 +41,11 @@ public interface ProgramDao {
     Program saveProgram(Program program);
 
     /**
+     * Marks one program as offline.
+     */
+    boolean offlineProgram(Long programId);
+
+    /**
      * Finds one normal program by id.
      */
     Optional<Program> findProgramById(Long id);
@@ -74,6 +79,11 @@ public interface ProgramDao {
      * Saves one ticket category.
      */
     TicketCategory saveTicketCategory(TicketCategory ticketCategory);
+
+    /**
+     * Updates one ticket category price.
+     */
+    boolean updateTicketCategoryPrice(Long programId, Long ticketCategoryId, java.math.BigDecimal price);
 
     /**
      * Finds one ticket category by id.

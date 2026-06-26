@@ -68,10 +68,18 @@ mybatis:
 damai:
   program-service:
     base-url: ${DAMAI_PROGRAM_SERVICE_BASE_URL:http://localhost:8082}
+    client:
+      connect-timeout-millis: ${DAMAI_PROGRAM_CONNECT_TIMEOUT_MILLIS:1000}
+      read-timeout-millis: ${DAMAI_PROGRAM_READ_TIMEOUT_MILLIS:2500}
+      retry-count: ${DAMAI_PROGRAM_RETRY_COUNT:1}
+      retry-backoff-millis: ${DAMAI_PROGRAM_RETRY_BACKOFF_MILLIS:150}
   order:
     timeout-minutes: 15
     timeout-scan-enabled: true
     timeout-scan-delay-millis: 60000
+    timeout-scan-lock:
+      wait-seconds: 1
+      lease-seconds: 120
     async:
       enabled: true
       create-topic: ${DAMAI_ORDER_CREATE_TOPIC:damai-order-create}
@@ -85,3 +93,15 @@ damai:
       redisson-enabled: true
       wait-seconds: 3
       lease-seconds: 10
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      orderProgramInventoryClient:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        ignore-exceptions:
+          - com.myown.damai.common.exception.BusinessException

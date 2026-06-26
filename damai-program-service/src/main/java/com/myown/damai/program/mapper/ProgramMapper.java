@@ -7,6 +7,7 @@ import com.myown.damai.program.entity.ProgramShowTime;
 import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.TicketCategory;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -42,6 +43,14 @@ public interface ProgramMapper {
      * Inserts one program.
      */
     int insertProgram(Program program);
+
+    /**
+     * Marks one program offline.
+     */
+    int offlineProgram(
+            @Param("programId") Long programId,
+            @Param("now") Instant now
+    );
 
     /**
      * Selects one normal program by id.
@@ -83,6 +92,16 @@ public interface ProgramMapper {
      * Inserts one ticket category.
      */
     int insertTicketCategory(TicketCategory ticketCategory);
+
+    /**
+     * Updates one ticket category price.
+     */
+    int updateTicketCategoryPrice(
+            @Param("programId") Long programId,
+            @Param("ticketCategoryId") Long ticketCategoryId,
+            @Param("price") BigDecimal price,
+            @Param("now") Instant now
+    );
 
     /**
      * Selects one ticket category by id.

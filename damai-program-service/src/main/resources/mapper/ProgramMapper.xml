@@ -191,6 +191,15 @@
           AND program_status = 1
     </select>
 
+    <update id="offlineProgram">
+        UPDATE d_program
+        SET program_status = 0,
+            edit_time = #{now}
+        WHERE id = #{programId}
+          AND status = 1
+          AND program_status = 1
+    </update>
+
     <select id="selectPrograms" resultMap="ProgramResultMap">
         SELECT <include refid="ProgramColumns"/>
         FROM d_program
@@ -252,6 +261,15 @@
         VALUES
             (#{programId}, #{introduce}, #{price}, #{totalNumber}, #{remainNumber}, #{createdAt}, #{updatedAt}, #{status})
     </insert>
+
+    <update id="updateTicketCategoryPrice">
+        UPDATE d_ticket_category
+        SET price = #{price},
+            edit_time = #{now}
+        WHERE id = #{ticketCategoryId}
+          AND program_id = #{programId}
+          AND status = 1
+    </update>
 
     <select id="selectTicketCategoryById" resultMap="TicketCategoryResultMap">
         SELECT id, program_id, introduce, price, total_number, remain_number, create_time, edit_time, status

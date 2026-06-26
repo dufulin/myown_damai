@@ -8,6 +8,8 @@ import com.myown.damai.program.dto.ProgramInventoryRequest;
 import com.myown.damai.program.dto.ProgramResponse;
 import com.myown.damai.program.dto.SeatBatchCreateRequest;
 import com.myown.damai.program.dto.SeatResponse;
+import com.myown.damai.program.dto.TicketCategoryPriceUpdateRequest;
+import com.myown.damai.program.dto.TicketCategoryResponse;
 import com.myown.damai.program.service.ProgramService;
 import com.myown.damai.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -139,6 +141,32 @@ public class ProgramController {
         LOGGER.info("program detail request received, programId={}", programId);
         ProgramDetailResponse response = programService.getProgramDetail(programId);
         LOGGER.info("program detail request succeeded, programId={}", programId);
+        return ApiResponse.success(response);
+    }
+
+    /**
+     * Marks one program offline.
+     */
+    @PostMapping("/{programId}/offline")
+    public ApiResponse<Void> offlineProgram(@PathVariable Long programId) {
+        LOGGER.info("program offline request received, programId={}", programId);
+        programService.offlineProgram(programId);
+        LOGGER.info("program offline request succeeded, programId={}", programId);
+        return ApiResponse.success();
+    }
+
+    /**
+     * Updates one ticket category price.
+     */
+    @PostMapping("/{programId}/ticket-categories/{ticketCategoryId}/price")
+    public ApiResponse<TicketCategoryResponse> updateTicketCategoryPrice(
+            @PathVariable Long programId,
+            @PathVariable Long ticketCategoryId,
+            @Valid @RequestBody TicketCategoryPriceUpdateRequest request
+    ) {
+        LOGGER.info("ticket category price update request received, programId={}, ticketCategoryId={}, price={}", programId, ticketCategoryId, request.price());
+        TicketCategoryResponse response = programService.updateTicketCategoryPrice(programId, ticketCategoryId, request);
+        LOGGER.info("ticket category price update request succeeded, programId={}, ticketCategoryId={}", programId, ticketCategoryId);
         return ApiResponse.success(response);
     }
 

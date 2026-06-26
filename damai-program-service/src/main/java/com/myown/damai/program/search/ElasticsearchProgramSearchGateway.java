@@ -147,6 +147,19 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
     }
 
     /**
+     * Deletes one program detail document from Elasticsearch.
+     */
+    @Override
+    public void deleteProgramDetail(Long programId) {
+        HttpResponse<String> httpResponse = send("DELETE", "/" + encodedIndexName() + "/_doc/" + programId, null);
+        if (httpResponse.statusCode() == 200 || httpResponse.statusCode() == 404) {
+            LOGGER.info("program detail es document deleted, programId={}, status={}", programId, httpResponse.statusCode());
+            return;
+        }
+        LOGGER.warn("program detail es document delete failed, programId={}, status={}, body={}", programId, httpResponse.statusCode(), httpResponse.body());
+    }
+
+    /**
      * Reads one program detail document from Elasticsearch.
      */
     @Override

@@ -2,6 +2,7 @@ package com.myown.damai.order.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.cache.DamaiCacheKey;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.order.client.ProgramInventoryClient;
 import com.myown.damai.order.client.ProgramInventoryItemRequest;
@@ -34,8 +35,10 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.redisson.api.RBucket;
+import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +60,6 @@ public class OrderService {
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderService.class);
     private static final int MAX_PAGE_SIZE = 100;
     private static final int EXPIRED_SCAN_LIMIT = 200;
-    private static final String ASYNC_PENDING_KEY_PREFIX = "damai:order:async:pending:user:";
     private static final String ASYNC_MESSAGE_KEY_PREFIX = "order-create:";
     private static final List<Integer> IDEMPOTENT_ORDER_STATUSES = Arrays.asList(
             OrderStatus.PENDING_PAYMENT.code(),
@@ -75,7 +77,10 @@ public class OrderService {
     private final ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider;
     private final ObjectProvider<RedissonClient> redissonClientProvider;
     private final Map<String, Long> localPendingOrders = new ConcurrentHashMap<>();
+    private final AtomicBoolean localTimeoutScanRunning = new AtomicBoolean(false);
     private final Duration orderTimeout;
+    private final Duration timeoutScanLockWaitTime;
+    private final Duration timeoutScanLockLeaseTime;
     private final boolean asyncEnabled;
     private final boolean inventoryEnabled;
     private final boolean timeoutScanEnabled;
@@ -96,6 +101,8 @@ public class OrderService {
             ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider,
             ObjectProvider<RedissonClient> redissonClientProvider,
             @Value("${damai.order.timeout-minutes:15}") long timeoutMinutes,
+            @Value("${damai.order.timeout-scan-lock.wait-seconds:1}") long timeoutScanLockWaitSeconds,
+            @Value("${damai.order.timeout-scan-lock.lease-seconds:120}") long timeoutScanLockLeaseSeconds,
             @Value("${damai.order.async.enabled:false}") boolean asyncEnabled,
             @Value("${damai.order.inventory.enabled:true}") boolean inventoryEnabled,
             @Value("${damai.order.timeout-scan-enabled:true}") boolean timeoutScanEnabled,
@@ -112,6 +119,8 @@ public class OrderService {
         this.orderAsyncProducerProvider = orderAsyncProducerProvider;
         this.redissonClientProvider = redissonClientProvider;
         this.orderTimeout = Duration.ofMinutes(timeoutMinutes);
+        this.timeoutScanLockWaitTime = Duration.ofSeconds(timeoutScanLockWaitSeconds);
+        this.timeoutScanLockLeaseTime = Duration.ofSeconds(timeoutScanLockLeaseSeconds);
         this.asyncEnabled = asyncEnabled;
         this.inventoryEnabled = inventoryEnabled;
         this.timeoutScanEnabled = timeoutScanEnabled;
@@ -442,7 +451,7 @@ public class OrderService {
      * Builds the pending marker key for one user and program pair.
      */
     private String pendingOrderKey(Long userId, Long programId) {
-        return ASYNC_PENDING_KEY_PREFIX + userId + ":program:" + programId;
+        return DamaiCacheKey.of("order", "async-pending", "user", userId, "program", programId);
     }
 
     /**
@@ -552,7 +561,6 @@ public class OrderService {
      * Periodically cancels unpaid orders whose expire time has passed.
      */
     @Scheduled(fixedDelayString = "${damai.order.timeout-scan-delay-millis:60000}")
-    @Transactional
     public void scheduledCancelTimeoutOrders() {
         if (!timeoutScanEnabled) {
             return;
@@ -566,8 +574,71 @@ public class OrderService {
     /**
      * Cancels expired unpaid orders and returns the number of canceled orders.
      */
-    @Transactional
     public int cancelTimeoutOrders() {
+        return cancelTimeoutOrdersWithExecutionGuard();
+    }
+
+    /**
+     * Runs timeout cancellation after acquiring a Redisson distributed lock or a local fallback guard.
+     */
+    private int cancelTimeoutOrdersWithExecutionGuard() {
+        RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
+        if (redissonClient == null) {
+            return cancelTimeoutOrdersWithLocalGuard();
+        }
+        String lockKey = DamaiCacheKey.lock("order", "timeout-scan");
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(timeoutScanLockWaitTime.toMillis(), timeoutScanLockLeaseTime.toMillis(), TimeUnit.MILLISECONDS);
+            if (!locked) {
+                LOGGER.info("timeout order scan skipped because another instance is running, lockKey={}", lockKey);
+                return 0;
+            }
+            LOGGER.info("timeout order scan lock acquired, lockKey={}", lockKey);
+            return executeTimeoutCancelTransaction();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("timeout order scan lock interrupted, lockKey={}", lockKey, exception);
+            return 0;
+        } catch (RuntimeException exception) {
+            LOGGER.warn("timeout order scan skipped because distributed lock failed, lockKey={}", lockKey, exception);
+            return 0;
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+                LOGGER.info("timeout order scan lock released, lockKey={}", lockKey);
+            }
+        }
+    }
+
+    /**
+     * Runs timeout cancellation with a local guard when Redisson is disabled or unavailable.
+     */
+    private int cancelTimeoutOrdersWithLocalGuard() {
+        if (!localTimeoutScanRunning.compareAndSet(false, true)) {
+            LOGGER.info("timeout order scan skipped because this instance is already running");
+            return 0;
+        }
+        try {
+            return executeTimeoutCancelTransaction();
+        } finally {
+            localTimeoutScanRunning.set(false);
+        }
+    }
+
+    /**
+     * Executes timeout cancellation in a database transaction while the scan guard is still held.
+     */
+    private int executeTimeoutCancelTransaction() {
+        Integer canceledCount = transactionTemplate.execute(status -> cancelExpiredUnpaidOrders());
+        return canceledCount == null ? 0 : canceledCount;
+    }
+
+    /**
+     * Cancels expired unpaid orders inside the caller-managed transaction.
+     */
+    private int cancelExpiredUnpaidOrders() {
         Instant now = Instant.now();
         List<Long> expiredOrderNumbers = orderDao.listExpiredUnpaidOrderNumbers(now, OrderStatus.PENDING_PAYMENT.code(), EXPIRED_SCAN_LIMIT);
         int canceledCount = 0;

@@ -59,5 +59,10 @@ damai:
   cache:
     redis-enabled: true
     null-ttl-minutes: 5
+    ttl-jitter-min-seconds: 0
+    ttl-jitter-max-seconds: 60
     user-ttl-hours: 6
     session-ttl-hours: 24
+    mutex-lock-seconds: 5
+    mutex-wait-millis: 300
+    mutex-retry-millis: 50

@@ -2,9 +2,9 @@
 
 ## 项目概览
 
-当前项目是一个前后端分离的单库版大麦票务管理系统，后端已按 Spring Cloud 拆分为网关、用户、节目、订单和公共模块，前端使用 Vue 3 + Vite 实现基础业务页面。
+当前项目是一个前后端分离的单库版大麦票务管理系统。后端已按 Spring Cloud 拆分为网关、用户、节目、订单、支付和公共模块；前端使用 Vue 3 + Vite 实现基础购票流程。
 
-统一前端访问入口：
+统一前端 API 访问入口：
 
 ```text
 http://127.0.0.1:8080
@@ -18,7 +18,7 @@ http://127.0.0.1:5173
 
 ## 服务模块
 
-1. `damai-common`：公共响应对象、业务异常和全局异常处理。
+1. `damai-common`：公共响应对象、业务异常、全局异常处理、身份请求头、Redis 缓存工具、布隆过滤器。
 2. `damai-gateway-service`：网关服务，默认端口 `8080`。
 3. `damai-user-service`：用户服务，默认端口 `8081`。
 4. `damai-program-service`：节目服务，默认端口 `8082`。
@@ -30,73 +30,106 @@ http://127.0.0.1:5173
 
 ### 网关服务
 
-1. 统一转发 `/api/users/**`、`/api/programs/**`、`/api/orders/**`。
-2. 除登录、注册和预检请求外，其他接口需要携带登录 token。
-3. 通过用户服务校验当前登录态。
-4. 支持同一 IP 的基础访问频率限制。
-5. 接入 Nacos 服务发现，使用服务名进行路由。
-6. 统一转发 `/api/pay/**` 到支付服务。
-7. 支付宝异步通知 `/api/pay/alipay/notify` 放行登录校验，保留后续真实支付宝回调能力。
+1. 统一转发 `/api/users/**`、`/api/programs/**`、`/api/orders/**`、`/api/pay/**`。
+2. 除注册、登录、预检请求和支付宝异步通知外，其他接口都需要登录态。
+3. 调用用户服务校验 token，并将可信用户 ID 写入 `X-Damai-User-Id` 请求头透传到下游。
+4. 下游订单、支付、购票人接口只信任网关透传身份，不信任前端传入的 `userId`。
+5. 支持同一 IP 的基础访问频率限制，降低简单防刷风险。
+6. 接入 Nacos 服务发现，支持通过服务名路由。
+7. 网关调用用户服务已配置连接超时、响应超时、有限重试和 Resilience4j 熔断降级。
+8. 所有网关过滤关键路径已添加必要日志。
 
 ### 用户服务
 
-1. 用户注册，手机号必填，邮箱可选。
-2. 用户可以通过手机号或邮箱登录。
-3. 获取当前登录用户信息。
-4. 用户退出登录。
-5. 登录 token 生成、存储和吊销。
+1. 支持用户注册，手机号必填，邮箱可选。
+2. 支持手机号或邮箱登录。
+3. 支持获取当前登录用户信息。
+4. 支持用户退出登录。
+5. 登录 token 支持生成、Redis/数据库持久化和吊销。
 6. 密码使用 BCrypt 加密存储。
-7. Redis 缓存手机号、邮箱和 token 查询结果，并使用空值缓存降低缓存穿透风险。
-8. 接口和关键业务逻辑已添加 SLF4J 日志。
+7. 支持购票人管理：查询、添加、删除实名购票人。
+8. Redis 缓存手机号、邮箱和 token 查询结果，并支持空值缓存、TTL 随机抖动、互斥重建，降低缓存穿透和缓存击穿风险。
+9. 接口和关键业务逻辑已添加 SLF4J 日志。
 
 ### 节目服务
 
-1. 节目类型创建和查询。
-2. 节目创建，包含节目分组、演出时间和票档信息。
-3. 节目列表查询，支持关键词、类型、地区和分页筛选。
-4. 节目详情查询，返回基础信息、节目介绍、演出时间、票档和购票须知。
-5. 座位批量初始化。
-6. 座位列表查询。
-7. 节目详情按节目 ID 优先查询 Redis，缓存未命中时查询数据库并回写 Redis。
+1. 支持节目类型创建和查询。
+2. 支持节目创建，包含节目分组、演出时间和票档信息。
+3. 支持节目列表查询，可按关键词、类型、地区和分页筛选。
+4. 支持 Elasticsearch 智能搜索，查询条件包括：
+   - `areaId`：地区 ID，全部时不传。
+   - `programCategoryId`：节目类型 ID，全部时不传。
+   - `timeType`：`0` 全部，`1` 今天，`2` 明天，`3` 一周内，`4` 一个月内，`5` 按日历。
+   - `startDateTime`、`endDateTime`：`timeType=5` 时必填，精确到日。
+   - `type`：`1` 相关度排序，`2` 推荐排序，`3` 最近开场，`4` 最新上架。
+5. 节目详情优先从 ES 查询，未命中再查数据库。
+6. 节目详情按节目 ID 查询 Redis，未命中时查数据库并回写 Redis。
+7. 节目详情缓存使用统一 key、TTL 抖动、空值缓存、互斥重建和布隆过滤器。
+8. 项目启动后异步初始化 ES：检查索引、创建 mapping、查询节目 ID、统计票档最低/最高价、构建完整节目文档。
+9. 支持节目变更事件同步 ES：节目创建、下架、票价变化会发布 Kafka 事件，消费者异步更新或删除搜索索引。
+10. 支持节目下架。
+11. 支持票档价格更新。
+12. 支持座位批量初始化和座位列表查询。
+13. 支持库存闭环接口：锁定库存/座位、释放库存/座位、支付成功后转已售。
+14. 座位状态支持可售、锁定、已售、释放流转。
+15. 接口和关键业务逻辑已添加 SLF4J 日志。
 
 ### 订单服务
 
-1. 根据节目、演出时间、票档和购票人明细创建未支付订单。
-2. 根据订单号查询订单详情。
-3. 按用户分页查询订单列表。
-4. 支持用户取消未支付订单。
-5. 支持超时未支付订单自动取消，默认每 60 秒扫描一次。
-6. 支持手动触发超时订单取消，方便测试和运维。
-7. 参考 `cloud/damai_order_0.sql` 的分表结构，设计了单库版 `d_order` 和 `d_order_ticket_user`。
-8. 接口已添加必要调用日志。
-9. 支持支付服务确认后将未支付订单更新为已支付。
+1. 支持根据节目、演出时间、票档和购票人明细创建订单。
+2. 下单流程包含幂等性校验：同一用户同一节目只能购买一次。
+3. 下单时使用 Redisson 按节目 ID 加分布式锁，降低并发超卖风险。
+4. 下单时预留 `TODO` 用于后续接入真实座位匹配策略。
+5. 下单成功后返回订单编号。
+6. 支持 Kafka 异步下单：前端先拿到订单号，后台消费消息完成建单。
+7. 异步下单支持消息唯一键、消息状态表、消费幂等、失败重试、死信主题和消息状态查询。
+8. 支持按订单号查询订单详情。
+9. 支持按当前登录用户分页查询订单列表。
+10. 支持用户取消未支付订单。
+11. 支持超时未支付订单取消，并释放节目库存和已锁座位。
+12. 超时取消任务使用 Redisson 分布式锁保护，多实例部署时避免重复扫描。
+13. 支持支付服务确认后将订单状态更新为已支付，并通知节目服务把库存/座位转为已售。
+14. 已引入订单状态机，统一管理待创建、待支付、已支付、已取消、已超时、已退款等状态流转，避免多处直接改状态。
+15. 调用节目库存服务已配置连接超时、读取超时、有限重试和 Resilience4j 熔断降级。
+16. 接口和关键业务逻辑已添加 SLF4J 日志。
 
 ### 支付服务
 
-1. 参考 `cloud/damai_pay_0.sql` 的分表结构，设计了单库版 `d_pay_bill` 和 `d_refund_bill`。
+1. 参考 `cloud/damai_pay_0.sql` 的支付和退款表结构，设计了单库版 `d_pay_bill`、`d_refund_bill`。
 2. 支持创建支付宝支付账单。
-3. 当前本地模式不跳转支付宝，创建支付账单后直接模拟支付成功。
+3. 当前本地模式不真实跳转支付宝，创建支付账单后直接模拟支付成功。
 4. 模拟支付成功后更新支付账单状态为已支付。
-5. 模拟支付成功后调用订单服务，将订单状态更新为已支付。
-6. 保留支付宝异步通知处理能力，后续真实接入时可继续扩展。
-7. 支持支付宝参数配置化，包括 `app-id`、商户私钥、支付宝公钥、回调地址和返回地址。
+5. 支付成功后通过本地消息表记录支付成功事件，再异步通知订单服务，降低跨服务一致性风险。
+6. 支付事件支持状态追踪、失败重试、手动补偿和人工按事件 key 重试。
+7. 保留支付宝异步通知处理能力，后续真实接入时可继续扩展。
+8. 支付宝参数支持配置化，包括 `app-id`、商户私钥、支付宝公钥、回调地址和返回地址。
+9. 支付服务调用订单服务已配置连接超时、响应超时、请求超时、有限重试和 Resilience4j 熔断降级。
+10. 接口和关键业务逻辑已添加 SLF4J 日志。
+
+### 缓存与配置治理
+
+1. MySQL、Redis、Kafka、ES、Nacos 地址已通过环境变量和 profile 管理。
+2. dev 默认尽量走 `localhost`，生产环境可继续接入 Nacos 配置中心。
+3. Redis key 命名已沉淀到公共模块，避免各服务各写一套。
+4. 缓存工具支持统一 TTL、随机抖动、空值缓存和互斥重建。
+5. 布隆过滤器已放入公共模块，可复用于 ID 型缓存穿透防护。
 
 ### 前端页面
 
-1. 登录页面：支持手机号或邮箱登录。
-2. 注册页面：支持姓名、手机号、邮箱和密码。
+1. 登录页面支持手机号或邮箱登录。
+2. 注册页面支持姓名、手机号、邮箱和密码。
 3. 登录后进入首页，默认加载 10 条节目。
 4. 首页包含搜索框。
-5. 首页包含按类型和按地区筛选的分类菜单。
-6. 点击分类或搜索后弹出节目列表，并支持分页。
-7. 点击节目进入节目详情页。
-8. 节目详情页展示节目介绍、演出时间、地点、票档和购票须知。
-9. 节目详情页包含“下单”功能，可选择演出时间、票档和数量创建订单。
-10. 顶部提供个人中心入口。
-11. 个人中心展示当前用户信息和订单列表。
-12. 个人中心支持刷新订单和取消未支付订单。
-13. 个人中心支持添加、刷新、删除购票人。
-14. 节目详情下单时支持选择购票人。
+5. 首页包含按类型和地区筛选的分类菜单。
+6. 支持 ES 智能搜索筛选条件：地区、节目类型、时间范围、排序方式。
+7. 点击分类或搜索后展示节目列表并支持分页。
+8. 点击节目进入节目详情页。
+9. 节目详情页展示节目介绍、演出时间、地点、票档和买票须知。
+10. 节目详情页包含下单功能，可选择演出时间、票档、数量和购票人。
+11. 顶部提供个人中心入口。
+12. 个人中心展示当前用户信息、订单列表和购票人列表。
+13. 个人中心支持刷新订单、取消未支付订单。
+14. 个人中心支持添加、刷新、删除购票人。
 15. 未支付订单支持点击“支付宝支付”，当前会模拟支付成功并刷新订单状态。
 16. 浏览器本地保存 token，并在刷新后尝试恢复登录态。
 
@@ -116,26 +149,17 @@ http://127.0.0.1:5173
 POST /api/users/register
 ```
 
-```json
-{
-  "name": "测试用户",
-  "mobile": "18800000000",
-  "email": "test@example.com",
-  "password": "123456"
-}
-```
-
 登录：
 
 ```http
 POST /api/users/login
 ```
 
-```json
-{
-  "login": "18800000000",
-  "password": "123456"
-}
+退出登录：
+
+```http
+POST /api/users/logout
+Authorization: Bearer <token>
 ```
 
 获取当前用户：
@@ -145,10 +169,24 @@ GET /api/users/me
 Authorization: Bearer <token>
 ```
 
-退出登录：
+查询购票人：
 
 ```http
-POST /api/users/logout
+GET /api/users/ticket-users
+Authorization: Bearer <token>
+```
+
+新增购票人：
+
+```http
+POST /api/users/ticket-users
+Authorization: Bearer <token>
+```
+
+删除购票人：
+
+```http
+DELETE /api/users/ticket-users/{ticketUserId}
 Authorization: Bearer <token>
 ```
 
@@ -166,14 +204,6 @@ Authorization: Bearer <token>
 POST /api/programs/categories
 ```
 
-```json
-{
-  "parentId": 0,
-  "name": "演唱会",
-  "type": 1
-}
-```
-
 查询类型：
 
 ```http
@@ -184,37 +214,19 @@ GET /api/programs/categories
 
 ```http
 POST /api/programs
-```
-
-```json
-{
-  "areaId": 110000,
-  "programCategoryId": 2,
-  "parentProgramCategoryId": 1,
-  "title": "测试演唱会",
-  "actor": "测试歌手",
-  "place": "测试场馆",
-  "detail": "节目详情",
-  "permitChooseSeat": 1,
-  "showTimes": [
-    {
-      "showTime": "2026-08-01T12:00:00Z"
-    }
-  ],
-  "ticketCategories": [
-    {
-      "introduce": "VIP",
-      "price": 680,
-      "totalNumber": 20
-    }
-  ]
-}
+Authorization: Bearer <token>
 ```
 
 节目列表：
 
 ```http
-GET /api/programs?keyword=测试&categoryId=2&areaId=110000&pageNumber=1&pageSize=20
+GET /api/programs?keyword=演唱会&categoryId=2&areaId=110000&pageNumber=1&pageSize=20
+```
+
+ES 智能搜索：
+
+```http
+GET /api/programs/search?keyword=演唱会&areaId=110000&programCategoryId=2&timeType=3&type=1&pageNumber=1&pageSize=20
 ```
 
 节目详情：
@@ -223,27 +235,49 @@ GET /api/programs?keyword=测试&categoryId=2&areaId=110000&pageNumber=1&pageSiz
 GET /api/programs/{programId}
 ```
 
+节目下架：
+
+```http
+POST /api/programs/{programId}/offline
+Authorization: Bearer <token>
+```
+
+更新票档价格：
+
+```http
+POST /api/programs/{programId}/ticket-categories/{ticketCategoryId}/price
+Authorization: Bearer <token>
+```
+
 批量初始化座位：
 
 ```http
 POST /api/programs/{programId}/seats
-```
-
-```json
-{
-  "ticketCategoryId": 1,
-  "startRow": 1,
-  "endRow": 2,
-  "startCol": 1,
-  "endCol": 3,
-  "seatType": 1
-}
+Authorization: Bearer <token>
 ```
 
 查询座位：
 
 ```http
 GET /api/programs/{programId}/seats
+```
+
+锁定库存和座位：
+
+```http
+POST /api/programs/{programId}/inventory/lock
+```
+
+释放库存和座位：
+
+```http
+POST /api/programs/{programId}/inventory/release
+```
+
+标记库存和座位已售：
+
+```http
+POST /api/programs/{programId}/inventory/sold
 ```
 
 ### 订单接口
@@ -261,30 +295,6 @@ POST /api/orders
 Authorization: Bearer <token>
 ```
 
-```json
-{
-  "programId": 1,
-  "programItemPicture": "https://example.com/poster.jpg",
-  "userId": 1,
-  "programTitle": "测试演唱会",
-  "programPlace": "测试场馆",
-  "programShowTime": "2026-08-01T12:00:00Z",
-  "programPermitChooseSeat": 0,
-  "distributionMode": "电子票",
-  "takeTicketMode": "线上取票",
-  "payOrderType": 1,
-  "ticketUsers": [
-    {
-      "ticketUserId": 1,
-      "seatId": null,
-      "seatInfo": "未选择座位",
-      "ticketCategoryId": 1,
-      "orderPrice": 680
-    }
-  ]
-}
-```
-
 查询订单详情：
 
 ```http
@@ -292,10 +302,17 @@ GET /api/orders/{orderNumber}
 Authorization: Bearer <token>
 ```
 
+查询异步下单消息状态：
+
+```http
+GET /api/orders/{orderNumber}/async-message
+Authorization: Bearer <token>
+```
+
 分页查询当前用户订单：
 
 ```http
-GET /api/orders?userId=1&pageNumber=1&pageSize=8
+GET /api/orders?pageNumber=1&pageSize=8
 Authorization: Bearer <token>
 ```
 
@@ -306,10 +323,10 @@ POST /api/orders/{orderNumber}/cancel
 Authorization: Bearer <token>
 ```
 
-```json
-{
-  "reason": "用户主动取消"
-}
+支付服务确认订单已支付：
+
+```http
+POST /api/orders/{orderNumber}/paid
 ```
 
 手动触发超时未支付取消：
@@ -334,15 +351,6 @@ POST /api/pay/alipay/page-pay
 Authorization: Bearer <token>
 ```
 
-```json
-{
-  "orderNumber": 1781600000000001,
-  "userId": 1
-}
-```
-
-接口返回支付账单信息，当前不会跳转支付宝，会直接将支付账单和订单状态更新为已支付。
-
 支付宝异步通知：
 
 ```http
@@ -350,13 +358,32 @@ POST /api/pay/alipay/notify
 Content-Type: application/x-www-form-urlencoded
 ```
 
-该接口保留给后续真实支付宝服务器回调，网关不要求登录 token。支付成功通知会更新 `d_pay_bill`，并调用订单服务把订单状态更新为已支付。
+手动补偿到期支付事件：
+
+```http
+POST /api/pay/events/compensate
+Authorization: Bearer <token>
+```
+
+按事件 key 手动重试：
+
+```http
+POST /api/pay/events/{eventKey}/retry
+Authorization: Bearer <token>
+```
+
+查询支付事件状态：
+
+```http
+GET /api/pay/events/{eventKey}
+Authorization: Bearer <token>
+```
 
 ## 数据库表
 
 ### 用户库表
 
-参考 `cloud/damai_user_0.sql`，单库版本位于：
+单库版建表文件：
 
 ```text
 damai-user-service/src/main/resources/schema.sql
@@ -372,7 +399,7 @@ damai-user-service/src/main/resources/schema.sql
 
 ### 节目库表
 
-参考 `cloud/damai_program_0.sql`，单库版本位于：
+单库版建表文件：
 
 ```text
 damai-program-service/src/main/resources/schema.sql
@@ -384,12 +411,12 @@ damai-program-service/src/main/resources/schema.sql
 2. `d_program_group`：节目分组表。
 3. `d_program_category`：节目类型表。
 4. `d_program_show_time`：节目演出时间表。
-5. `d_ticket_category`：节目票档表。
-6. `d_seat`：座位表。
+5. `d_ticket_category`：节目票档表，包含库存字段。
+6. `d_seat`：座位表，支持座位状态流转。
 
 ### 订单库表
 
-参考 `cloud/damai_order_0.sql`，单库版本位于：
+单库版建表文件：
 
 ```text
 damai-order-service/src/main/resources/schema.sql
@@ -399,10 +426,11 @@ damai-order-service/src/main/resources/schema.sql
 
 1. `d_order`：订单主表。
 2. `d_order_ticket_user`：订单购票人明细表。
+3. `d_order_async_message`：异步下单消息追踪表。
 
 ### 支付库表
 
-参考 `cloud/damai_pay_0.sql`，单库版本位于：
+单库版建表文件：
 
 ```text
 damai-pay-service/src/main/resources/schema.sql
@@ -412,6 +440,7 @@ damai-pay-service/src/main/resources/schema.sql
 
 1. `d_pay_bill`：支付账单表。
 2. `d_refund_bill`：退款账单表。
+3. `d_pay_order_event`：支付成功通知订单服务的本地事件表。
 
 ## 技术栈
 
@@ -420,18 +449,20 @@ damai-pay-service/src/main/resources/schema.sql
 1. Java 17
 2. Spring Boot 3.2.5
 3. Spring Cloud Gateway
-4. Spring Cloud Alibaba Nacos Discovery
+4. Spring Cloud Alibaba Nacos Discovery / Config
 5. Spring MVC
-6. Spring Validation
-7. MyBatis
-8. MySQL 5.7
-9. Redis 6.0.8
-10. Nacos 2.2.3
-11. H2 测试数据库
-12. JUnit + MockMvc 接口测试
-13. SLF4J 日志
-14. WebClient 服务间调用
-15. 支付宝支付账单与本地模拟支付
+6. Spring WebFlux WebClient
+7. Spring Validation
+8. MyBatis
+9. MySQL 5.7
+10. Redis 6.0.8
+11. Redisson
+12. Kafka
+13. Elasticsearch 8.5.2
+14. Resilience4j
+15. H2 测试数据库
+16. JUnit + MockMvc 接口测试
+17. SLF4J 日志
 
 ### 前端
 
@@ -447,6 +478,8 @@ damai-pay-service/src/main/resources/schema.sql
 ```powershell
 docker compose up -d mysql redis nacos
 ```
+
+如果不用 `docker compose`，也可以按本地实际情况分别启动 MySQL、Redis、Nacos、Kafka、Elasticsearch。
 
 分别启动后端服务：
 
@@ -474,19 +507,11 @@ npm run dev
 mvn -s maven-settings.xml test
 ```
 
-当前测试覆盖：
+指定服务编译示例：
 
-1. 用户注册、邮箱登录、获取当前用户、退出登录完整流程。
-2. 重复手机号注册。
-3. 错误密码登录。
-4. 节目类型创建。
-5. 节目创建、列表和详情。
-6. 座位批量初始化和查询。
-7. 订单创建、查询、列表和取消。
-8. 超时未支付订单取消。
-9. 订单支付状态更新。
-10. 支付宝支付单创建、模拟支付和异步通知处理。
-11. 网关登录态过滤和 IP 访问频率限制。
+```powershell
+mvn -s maven-settings.xml -pl damai-gateway-service,damai-pay-service,damai-order-service -am -DskipTests compile
+```
 
 前端构建：
 
@@ -495,14 +520,31 @@ cd frontend
 npm run build
 ```
 
+当前测试覆盖重点：
+
+1. 用户注册、邮箱/手机号登录、获取当前用户、退出登录。
+2. 重复手机号注册和错误密码登录。
+3. 购票人查询、添加、删除。
+4. 节目类型创建。
+5. 节目创建、列表、详情和 ES 搜索。
+6. 节目详情缓存、布隆过滤器和 ES 初始化。
+7. 节目下架、票档价格更新和 ES 事件同步。
+8. 座位批量初始化、查询、锁定、释放、已售。
+9. 订单异步创建、查询、列表、取消和消息状态查询。
+10. 超时未支付订单取消。
+11. 订单状态机流转保护。
+12. 订单库存扣减和锁座闭环。
+13. 支付账单创建、模拟支付和异步通知订单。
+14. 支付本地事件补偿、重试和状态查询。
+15. 网关登录态过滤、身份透传和 IP 访问频率限制。
+16. 服务间调用超时、重试和熔断配置。
+
 ## 后续可扩展方向
 
-1. 购票人编辑能力。
-2. 节目更新和上下架。
-3. 票档库存扣减。
-4. 座位锁定和释放。
-5. 退款接口和支付宝退款回调。
-6. 支付状态主动查询和补偿任务。
-7. 后台管理员登录。
-8. 更细粒度接口鉴权。
-9. Redis 分布式锁或数据库乐观锁库存扣减。
+1. 接入真实支付宝页面支付、主动查单、退款申请和退款回调。
+2. 将超时订单取消从定时扫描进一步演进为 Redis 延迟队列、Kafka 延迟主题或时间轮。
+3. 完善后台管理端，支持节目审核、运营配置和人工补偿处理。
+4. 增加更细粒度的 RBAC 权限控制。
+5. 增加库存流水表和对账任务，便于排查库存异常。
+6. 增加链路追踪、指标监控和告警，例如 Micrometer、Prometheus、Grafana。
+7. 为 Kafka、ES、Redis 增加更完整的集成测试或 Testcontainers 测试。

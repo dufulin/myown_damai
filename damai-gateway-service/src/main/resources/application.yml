@@ -75,9 +75,27 @@ damai:
   gateway:
     auth-enabled: true
     user-service-url: http://damai-user-service
+    user-service:
+      connect-timeout-millis: ${DAMAI_GATEWAY_USER_CONNECT_TIMEOUT_MILLIS:1000}
+      response-timeout-millis: ${DAMAI_GATEWAY_USER_RESPONSE_TIMEOUT_MILLIS:1500}
+      read-timeout-millis: ${DAMAI_GATEWAY_USER_READ_TIMEOUT_MILLIS:1500}
+      write-timeout-millis: ${DAMAI_GATEWAY_USER_WRITE_TIMEOUT_MILLIS:1500}
+      timeout-millis: ${DAMAI_GATEWAY_USER_TIMEOUT_MILLIS:1800}
+      retry-count: ${DAMAI_GATEWAY_USER_RETRY_COUNT:1}
+      retry-backoff-millis: ${DAMAI_GATEWAY_USER_RETRY_BACKOFF_MILLIS:100}
     rate-limit-enabled: true
     rate-limit:
       max-requests: 120
       window-seconds: 60
   cache:
     redis-enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      gatewayUserAuth:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3

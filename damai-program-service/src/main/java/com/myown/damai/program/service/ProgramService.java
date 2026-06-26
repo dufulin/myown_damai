@@ -2,6 +2,9 @@ package com.myown.damai.program.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.cache.DamaiCacheKey;
+import com.myown.damai.common.cache.RedisStringCacheClient;
+import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.program.dao.ProgramDao;
 import com.myown.damai.program.dto.ProgramCategoryRequest;
 import com.myown.damai.program.dto.ProgramCategoryResponse;
@@ -15,6 +18,7 @@ import com.myown.damai.program.dto.ProgramShowTimeResponse;
 import com.myown.damai.program.dto.SeatBatchCreateRequest;
 import com.myown.damai.program.dto.SeatResponse;
 import com.myown.damai.program.dto.TicketCategoryRequest;
+import com.myown.damai.program.dto.TicketCategoryPriceUpdateRequest;
 import com.myown.damai.program.dto.TicketCategoryResponse;
 import com.myown.damai.program.entity.Program;
 import com.myown.damai.program.entity.ProgramCategory;
@@ -24,12 +28,13 @@ import com.myown.damai.program.entity.ProgramTicketPriceRange;
 import com.myown.damai.program.entity.Seat;
 import com.myown.damai.program.entity.SeatSellStatus;
 import com.myown.damai.program.entity.TicketCategory;
+import com.myown.damai.program.messaging.ProgramChangeEventPublisher;
 import com.myown.damai.program.search.ProgramBloomFilter;
 import com.myown.damai.program.search.ProgramSearchGateway;
 import com.myown.damai.program.search.ProgramSearchDocument;
 import com.myown.damai.program.dto.ProgramSearchRequest;
-import com.myown.damai.common.exception.BusinessException;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -44,7 +49,6 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,8 +61,6 @@ import org.springframework.util.StringUtils;
 public class ProgramService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ProgramService.class);
-    private static final String NULL_VALUE = "__NULL__";
-    private static final String PROGRAM_DETAIL_KEY_PREFIX = "damai:program:detail:";
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Shanghai");
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_SEAT_BATCH_SIZE = 5000;
@@ -66,30 +68,42 @@ public class ProgramService {
     private final ProgramDao programDao;
     private final ProgramSearchGateway programSearchGateway;
     private final ProgramBloomFilter programBloomFilter;
-    private final StringRedisTemplate redisTemplate;
+    private final ProgramChangeEventPublisher programChangeEventPublisher;
+    private final RedisStringCacheClient cacheClient;
     private final ObjectMapper objectMapper;
-    private final boolean redisEnabled;
-    private final java.time.Duration nullTtl;
-    private final java.time.Duration programDetailTtl;
+    private final Duration nullTtl;
+    private final Duration programDetailTtl;
+    private final Duration mutexLockTtl;
+    private final Duration mutexWaitTimeout;
+    private final Duration mutexRetryInterval;
 
+    /**
+     * Creates the program service with persistence, search, Bloom filter, and cache dependencies.
+     */
     public ProgramService(
             ProgramDao programDao,
             ProgramSearchGateway programSearchGateway,
             ProgramBloomFilter programBloomFilter,
-            StringRedisTemplate redisTemplate,
+            ProgramChangeEventPublisher programChangeEventPublisher,
+            RedisStringCacheClient cacheClient,
             ObjectMapper objectMapper,
-            @Value("${damai.cache.redis-enabled:true}") boolean redisEnabled,
             @Value("${damai.cache.null-ttl-minutes:5}") long nullTtlMinutes,
-            @Value("${damai.cache.program-detail-ttl-hours:2}") long programDetailTtlHours
+            @Value("${damai.cache.program-detail-ttl-hours:2}") long programDetailTtlHours,
+            @Value("${damai.cache.mutex-lock-seconds:5}") long mutexLockSeconds,
+            @Value("${damai.cache.mutex-wait-millis:500}") long mutexWaitMillis,
+            @Value("${damai.cache.mutex-retry-millis:50}") long mutexRetryMillis
     ) {
         this.programDao = programDao;
         this.programSearchGateway = programSearchGateway;
         this.programBloomFilter = programBloomFilter;
-        this.redisTemplate = redisTemplate;
+        this.programChangeEventPublisher = programChangeEventPublisher;
+        this.cacheClient = cacheClient;
         this.objectMapper = objectMapper;
-        this.redisEnabled = redisEnabled;
-        this.nullTtl = java.time.Duration.ofMinutes(nullTtlMinutes);
-        this.programDetailTtl = java.time.Duration.ofHours(programDetailTtlHours);
+        this.nullTtl = Duration.ofMinutes(nullTtlMinutes);
+        this.programDetailTtl = Duration.ofHours(programDetailTtlHours);
+        this.mutexLockTtl = Duration.ofSeconds(mutexLockSeconds);
+        this.mutexWaitTimeout = Duration.ofMillis(mutexWaitMillis);
+        this.mutexRetryInterval = Duration.ofMillis(mutexRetryMillis);
     }
 
     /**
@@ -146,7 +160,7 @@ public class ProgramService {
         ProgramDetailResponse response = ProgramDetailResponse.of(savedProgram, showTimes, ticketCategories);
         putProgramDetailCache(savedProgram.id, response);
         programBloomFilter.add(savedProgram.id);
-        programSearchGateway.saveProgramDetail(buildSearchDocument(savedProgram.id, response, calculatePriceRange(ticketCategories)));
+        programChangeEventPublisher.publishUpsert(savedProgram.id, "PROGRAM_CREATED");
         return response;
     }
 
@@ -218,25 +232,20 @@ public class ProgramService {
             return esDetail.get();
         }
 
-        Optional<String> cachedValue = getCache(programDetailKey(programId));
-        if (cachedValue.isPresent()) {
-            String value = cachedValue.get();
-            if (NULL_VALUE.equals(value)) {
-                LOGGER.info("program detail cache null marker hit, programId={}", programId);
-                throw new BusinessException("PROGRAM_NOT_FOUND", "program not found", HttpStatus.NOT_FOUND);
-            }
-            Optional<ProgramDetailResponse> cachedDetail = deserializeProgramDetail(value, programId);
-            if (cachedDetail.isPresent()) {
-                LOGGER.info("program detail cache hit, programId={}", programId);
-                return cachedDetail.get();
-            }
+        Optional<ProgramDetailResponse> cachedDetail = readProgramDetailCache(programId);
+        if (cachedDetail.isPresent()) {
+            return cachedDetail.get();
         }
 
         LOGGER.info("program detail cache miss, programId={}", programId);
-        ProgramDetailResponse response = loadProgramDetailFromDatabase(programId, true);
-        putProgramDetailCache(programId, response);
-        programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, calculatePriceRange(response.ticketCategories())));
-        return response;
+        return cacheClient.rebuildWithMutex(
+                programDetailLockKey(programId),
+                mutexLockTtl,
+                mutexWaitTimeout,
+                mutexRetryInterval,
+                () -> readProgramDetailCache(programId),
+                () -> loadProgramDetailFromDatabaseAndRefreshCache(programId)
+        );
     }
 
     /**
@@ -264,6 +273,34 @@ public class ProgramService {
     }
 
     /**
+     * Synchronizes one current program detail into the search index.
+     */
+    @Transactional(readOnly = true)
+    public void syncProgramDetailToSearchIndex(Long programId) {
+        try {
+            ProgramDetailResponse response = loadProgramDetailFromDatabase(programId, false);
+            putProgramDetailCache(programId, response);
+            programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, calculatePriceRange(response.ticketCategories())));
+            LOGGER.info("program detail search index synchronized, programId={}", programId);
+        } catch (BusinessException exception) {
+            if ("PROGRAM_NOT_FOUND".equals(exception.getCode())) {
+                deleteProgramDetailFromSearchIndex(programId);
+                return;
+            }
+            throw exception;
+        }
+    }
+
+    /**
+     * Deletes one program detail from cache and search index.
+     */
+    public void deleteProgramDetailFromSearchIndex(Long programId) {
+        cacheClient.delete(programDetailKey(programId));
+        programSearchGateway.deleteProgramDetail(programId);
+        LOGGER.info("program detail search index deleted, programId={}", programId);
+    }
+
+    /**
      * Loads one program detail from MySQL and optionally writes a null marker for missing ids.
      */
     private ProgramDetailResponse loadProgramDetailFromDatabase(Long programId, boolean cacheNullMarker) {
@@ -271,7 +308,7 @@ public class ProgramService {
                 .orElseThrow(() -> {
                     if (cacheNullMarker) {
                         // Cache a short-lived null marker so repeated invalid ids do not keep hitting MySQL.
-                        putCache(programDetailKey(programId), NULL_VALUE, nullTtl);
+                        cacheClient.putNull(programDetailKey(programId), nullTtl);
                     }
                     return new BusinessException("PROGRAM_NOT_FOUND", "program not found", HttpStatus.NOT_FOUND);
                 });
@@ -440,7 +477,8 @@ public class ProgramService {
             }
         });
         updateSeatStatuses(programId, request.items(), SeatSellStatus.AVAILABLE, SeatSellStatus.LOCKED, "PROGRAM_SEAT_NOT_AVAILABLE");
-        deleteCache(programDetailKey(programId));
+        cacheClient.delete(programDetailKey(programId));
+        programChangeEventPublisher.publishUpsert(programId, "INVENTORY_LOCKED");
         LOGGER.info("program inventory locked, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
     }
 
@@ -458,7 +496,8 @@ public class ProgramService {
             }
         });
         updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.AVAILABLE, "PROGRAM_SEAT_RELEASE_FAILED");
-        deleteCache(programDetailKey(programId));
+        cacheClient.delete(programDetailKey(programId));
+        programChangeEventPublisher.publishUpsert(programId, "INVENTORY_RELEASED");
         LOGGER.info("program inventory released, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
     }
 
@@ -469,8 +508,47 @@ public class ProgramService {
     public void markInventorySold(Long programId, ProgramInventoryRequest request) {
         findProgramOrThrow(programId);
         updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.SOLD, "PROGRAM_SEAT_SOLD_FAILED");
-        deleteCache(programDetailKey(programId));
+        cacheClient.delete(programDetailKey(programId));
+        programChangeEventPublisher.publishUpsert(programId, "INVENTORY_SOLD");
         LOGGER.info("program inventory sold, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
+    }
+
+    /**
+     * Updates one ticket category price and publishes a search-index refresh event.
+     */
+    @Transactional
+    public TicketCategoryResponse updateTicketCategoryPrice(Long programId, Long ticketCategoryId, TicketCategoryPriceUpdateRequest request) {
+        findProgramOrThrow(programId);
+        TicketCategory ticketCategory = programDao.findTicketCategoryById(ticketCategoryId)
+                .orElseThrow(() -> new BusinessException("TICKET_CATEGORY_NOT_FOUND", "ticket category not found", HttpStatus.NOT_FOUND));
+        if (!programId.equals(ticketCategory.programId)) {
+            throw new BusinessException("TICKET_CATEGORY_MISMATCH", "ticket category does not belong to program", HttpStatus.BAD_REQUEST);
+        }
+        boolean updated = programDao.updateTicketCategoryPrice(programId, ticketCategoryId, request.price());
+        if (!updated) {
+            throw new BusinessException("TICKET_CATEGORY_UPDATE_FAILED", "ticket category price update failed", HttpStatus.CONFLICT);
+        }
+        cacheClient.delete(programDetailKey(programId));
+        programChangeEventPublisher.publishUpsert(programId, "TICKET_PRICE_CHANGED");
+        TicketCategory updatedTicketCategory = programDao.findTicketCategoryById(ticketCategoryId)
+                .orElseThrow(() -> new BusinessException("TICKET_CATEGORY_NOT_FOUND", "ticket category not found", HttpStatus.NOT_FOUND));
+        LOGGER.info("ticket category price updated, programId={}, ticketCategoryId={}, price={}", programId, ticketCategoryId, request.price());
+        return TicketCategoryResponse.from(updatedTicketCategory);
+    }
+
+    /**
+     * Marks one program offline and publishes a search-index delete event.
+     */
+    @Transactional
+    public void offlineProgram(Long programId) {
+        findProgramOrThrow(programId);
+        boolean updated = programDao.offlineProgram(programId);
+        if (!updated) {
+            throw new BusinessException("PROGRAM_OFFLINE_FAILED", "program offline failed", HttpStatus.CONFLICT);
+        }
+        cacheClient.delete(programDetailKey(programId));
+        programChangeEventPublisher.publishDelete(programId, "PROGRAM_OFFLINE");
+        LOGGER.info("program offline succeeded, programId={}", programId);
     }
 
     /**
@@ -657,7 +735,14 @@ public class ProgramService {
      * Builds the Redis key for one program detail snapshot.
      */
     private String programDetailKey(Long programId) {
-        return PROGRAM_DETAIL_KEY_PREFIX + programId;
+        return DamaiCacheKey.of("program", "detail", programId);
+    }
+
+    /**
+     * Builds the Redis mutex key for rebuilding one program detail snapshot.
+     */
+    private String programDetailLockKey(Long programId) {
+        return DamaiCacheKey.lock("program", "detail", programId);
     }
 
     /**
@@ -665,10 +750,38 @@ public class ProgramService {
      */
     private void putProgramDetailCache(Long programId, ProgramDetailResponse response) {
         try {
-            putCache(programDetailKey(programId), objectMapper.writeValueAsString(response), programDetailTtl);
+            cacheClient.put(programDetailKey(programId), objectMapper.writeValueAsString(response), programDetailTtl);
         } catch (JsonProcessingException exception) {
             LOGGER.warn("program detail cache serialization failed, programId={}", programId, exception);
         }
+    }
+
+    /**
+     * Reads one program detail cache entry and handles the standardized null marker.
+     */
+    private Optional<ProgramDetailResponse> readProgramDetailCache(Long programId) {
+        Optional<String> cachedValue = cacheClient.get(programDetailKey(programId));
+        if (cachedValue.isEmpty()) {
+            return Optional.empty();
+        }
+        String value = cachedValue.get();
+        if (cacheClient.isNullValue(value)) {
+            LOGGER.info("program detail cache null marker hit, programId={}", programId);
+            throw new BusinessException("PROGRAM_NOT_FOUND", "program not found", HttpStatus.NOT_FOUND);
+        }
+        Optional<ProgramDetailResponse> cachedDetail = deserializeProgramDetail(value, programId);
+        cachedDetail.ifPresent(detail -> LOGGER.info("program detail cache hit, programId={}", programId));
+        return cachedDetail;
+    }
+
+    /**
+     * Loads one program detail from MySQL and refreshes Redis and Elasticsearch.
+     */
+    private ProgramDetailResponse loadProgramDetailFromDatabaseAndRefreshCache(Long programId) {
+        ProgramDetailResponse response = loadProgramDetailFromDatabase(programId, true);
+        putProgramDetailCache(programId, response);
+        programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, calculatePriceRange(response.ticketCategories())));
+        return response;
     }
 
     /**
@@ -679,51 +792,8 @@ public class ProgramService {
             return Optional.of(objectMapper.readValue(value, ProgramDetailResponse.class));
         } catch (JsonProcessingException exception) {
             LOGGER.warn("program detail cache deserialization failed, programId={}", programId, exception);
-            deleteCache(programDetailKey(programId));
+            cacheClient.delete(programDetailKey(programId));
             return Optional.empty();
-        }
-    }
-
-    /**
-     * Reads a raw Redis string value.
-     */
-    private Optional<String> getCache(String key) {
-        if (!redisEnabled) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.ofNullable(redisTemplate.opsForValue().get(key));
-        } catch (RuntimeException exception) {
-            LOGGER.warn("redis get failed, key={}", key, exception);
-            return Optional.empty();
-        }
-    }
-
-    /**
-     * Writes a raw Redis string value with a TTL.
-     */
-    private void putCache(String key, String value, java.time.Duration ttl) {
-        if (!redisEnabled) {
-            return;
-        }
-        try {
-            redisTemplate.opsForValue().set(key, value, ttl);
-        } catch (RuntimeException exception) {
-            LOGGER.warn("redis set failed, key={}", key, exception);
-        }
-    }
-
-    /**
-     * Deletes one Redis cache key.
-     */
-    private void deleteCache(String key) {
-        if (!redisEnabled) {
-            return;
-        }
-        try {
-            redisTemplate.delete(key);
-        } catch (RuntimeException exception) {
-            LOGGER.warn("redis delete failed, key={}", key, exception);
         }
     }
 

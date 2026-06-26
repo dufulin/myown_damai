@@ -1,5 +1,6 @@
 package com.myown.damai.order.lock;
 
+import com.myown.damai.common.cache.DamaiCacheKey;
 import com.myown.damai.common.exception.BusinessException;
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Component;
 public class RedissonOrderLockExecutor implements OrderLockExecutor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RedissonOrderLockExecutor.class);
-    private static final String LOCK_KEY_PREFIX = "damai:order:create:program:";
 
     private final RedissonClient redissonClient;
     private final Duration waitTime;
@@ -44,7 +44,7 @@ public class RedissonOrderLockExecutor implements OrderLockExecutor {
      */
     @Override
     public <T> T executeWithProgramLock(Long programId, Supplier<T> callback) {
-        String lockKey = LOCK_KEY_PREFIX + programId;
+        String lockKey = DamaiCacheKey.lock("order", "create-program", programId);
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {

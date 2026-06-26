@@ -22,6 +22,11 @@ public interface ProgramSearchGateway {
     void saveProgramDetail(ProgramSearchDocument document);
 
     /**
+     * Deletes one program detail document from the search index.
+     */
+    void deleteProgramDetail(Long programId);
+
+    /**
      * Finds one program detail document by program id.
      */
     Optional<ProgramDetailResponse> findProgramDetail(Long programId);

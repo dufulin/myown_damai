@@ -31,6 +31,13 @@ public class NoopProgramSearchGateway implements ProgramSearchGateway {
     }
 
     /**
+     * Ignores document deletes while search is disabled.
+     */
+    @Override
+    public void deleteProgramDetail(Long programId) {
+    }
+
+    /**
      * Returns an empty result while search is disabled.
      */
     @Override

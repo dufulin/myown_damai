@@ -1,59 +1,92 @@
 package com.myown.damai.user.dao;
 
+import com.myown.damai.common.cache.DamaiCacheKey;
+import com.myown.damai.common.cache.RedisStringCacheClient;
 import com.myown.damai.user.entity.UserSession;
 import com.myown.damai.user.mapper.UserSessionMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
+/**
+ * Stores user sessions with Redis-assisted token lookup caching.
+ */
 @Repository
 public class UserSessionDaoImpl implements UserSessionDao {
 
-    private static final String NULL_VALUE = "__NULL__";
-    private static final String TOKEN_KEY_PREFIX = "damai:user:session:";
-
     private final UserSessionMapper userSessionMapper;
-    private final StringRedisTemplate redisTemplate;
-    private final boolean redisEnabled;
+    private final RedisStringCacheClient cacheClient;
     private final Duration nullTtl;
     private final Duration sessionTtl;
+    private final Duration mutexLockTtl;
+    private final Duration mutexWaitTimeout;
+    private final Duration mutexRetryInterval;
 
+    /**
+     * Creates the DAO with session persistence and standardized Redis cache support.
+     */
     public UserSessionDaoImpl(
             UserSessionMapper userSessionMapper,
-            StringRedisTemplate redisTemplate,
-            @Value("${damai.cache.redis-enabled:true}") boolean redisEnabled,
+            RedisStringCacheClient cacheClient,
             @Value("${damai.cache.null-ttl-minutes:5}") long nullTtlMinutes,
-            @Value("${damai.cache.session-ttl-hours:24}") long sessionTtlHours
+            @Value("${damai.cache.session-ttl-hours:24}") long sessionTtlHours,
+            @Value("${damai.cache.mutex-lock-seconds:5}") long mutexLockSeconds,
+            @Value("${damai.cache.mutex-wait-millis:300}") long mutexWaitMillis,
+            @Value("${damai.cache.mutex-retry-millis:50}") long mutexRetryMillis
     ) {
         this.userSessionMapper = userSessionMapper;
-        this.redisTemplate = redisTemplate;
-        this.redisEnabled = redisEnabled;
+        this.cacheClient = cacheClient;
         this.nullTtl = Duration.ofMinutes(nullTtlMinutes);
         this.sessionTtl = Duration.ofHours(sessionTtlHours);
+        this.mutexLockTtl = Duration.ofSeconds(mutexLockSeconds);
+        this.mutexWaitTimeout = Duration.ofMillis(mutexWaitMillis);
+        this.mutexRetryInterval = Duration.ofMillis(mutexRetryMillis);
     }
 
     @Override
     public Optional<UserSession> findByTokenHash(String tokenHash) {
         String key = tokenKey(tokenHash);
-        Optional<String> cachedSessionId = getCache(key);
+        Optional<Optional<UserSession>> cachedSession = readCachedSessionIndex(key);
+        if (cachedSession.isPresent()) {
+            return cachedSession.get();
+        }
+        return cacheClient.rebuildWithMutex(
+                DamaiCacheKey.lock("user", "session", tokenHash),
+                mutexLockTtl,
+                mutexWaitTimeout,
+                mutexRetryInterval,
+                () -> readCachedSessionIndex(key),
+                () -> loadSessionIndex(key, tokenHash)
+        );
+    }
+
+    /**
+     * Reads one cached session index and preserves null-marker hits as present empty values.
+     */
+    private Optional<Optional<UserSession>> readCachedSessionIndex(String key) {
+        Optional<String> cachedSessionId = cacheClient.get(key);
         if (cachedSessionId.isPresent()) {
             String value = cachedSessionId.get();
-            if (NULL_VALUE.equals(value)) {
-                return Optional.empty();
+            if (cacheClient.isNullValue(value)) {
+                return Optional.of(Optional.empty());
             }
-            return findCachedSessionById(value, key);
+            return findCachedSessionById(value, key).map(Optional::of);
         }
+        return Optional.empty();
+    }
 
+    /**
+     * Loads one session index from MySQL and writes a value or null marker back to Redis.
+     */
+    private Optional<UserSession> loadSessionIndex(String key, String tokenHash) {
         Optional<UserSession> session = Optional.ofNullable(userSessionMapper.selectByTokenHash(tokenHash));
         if (session.isPresent()) {
-            putCache(key, String.valueOf(session.get().getId()), sessionTtl);
+            cacheClient.put(key, String.valueOf(session.get().getId()), sessionTtl);
         } else {
-            putCache(key, NULL_VALUE, nullTtl);
+            cacheClient.putNull(key, nullTtl);
         }
         return session;
     }
@@ -67,63 +100,31 @@ public class UserSessionDaoImpl implements UserSessionDao {
         } else {
             userSessionMapper.update(session);
         }
-        putCache(tokenKey(session.getTokenHash()), String.valueOf(session.getId()), sessionTtl);
+        cacheClient.put(tokenKey(session.getTokenHash()), String.valueOf(session.getId()), sessionTtl);
         return session;
     }
 
+    /**
+     * Loads a cached session id and removes the token cache when it is stale or malformed.
+     */
     private Optional<UserSession> findCachedSessionById(String value, String cacheKey) {
         try {
             Long sessionId = Long.valueOf(value);
             Optional<UserSession> session = Optional.ofNullable(userSessionMapper.selectById(sessionId));
             if (session.isEmpty()) {
-                deleteCache(cacheKey);
+                cacheClient.delete(cacheKey);
             }
             return session;
         } catch (NumberFormatException exception) {
-            deleteCache(cacheKey);
+            cacheClient.delete(cacheKey);
             return Optional.empty();
         }
     }
 
+    /**
+     * Builds the cache key for a token hash lookup.
+     */
     private String tokenKey(String tokenHash) {
-        return TOKEN_KEY_PREFIX + tokenHash;
-    }
-
-    private Optional<String> getCache(String key) {
-        if (!redisEnabled) {
-            return Optional.empty();
-        }
-        try {
-            return Optional.ofNullable(redisTemplate.opsForValue().get(key));
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private void putCache(String key, String value, Duration ttl) {
-        if (!redisEnabled) {
-            return;
-        }
-        try {
-            redisTemplate.opsForValue().set(key, value, withJitter(ttl));
-        } catch (RuntimeException exception) {
-            // Redis is an optimization here; database state remains the source of truth.
-        }
-    }
-
-    private void deleteCache(String key) {
-        if (!redisEnabled) {
-            return;
-        }
-        try {
-            redisTemplate.delete(key);
-        } catch (RuntimeException exception) {
-            // Ignore transient cache failures.
-        }
-    }
-
-    private Duration withJitter(Duration ttl) {
-        long jitterSeconds = ThreadLocalRandom.current().nextLong(0, 60);
-        return ttl.plusSeconds(jitterSeconds);
+        return DamaiCacheKey.of("user", "session", tokenHash);
     }
 }
