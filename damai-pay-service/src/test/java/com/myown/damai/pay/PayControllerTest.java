@@ -33,6 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class PayControllerTest {
 
     private static final String USER_ID_HEADER = "X-Damai-User-Id";
+    private static final String USER_ROLE_HEADER = "X-Damai-User-Role";
 
     @Autowired
     private MockMvc mockMvc;
@@ -68,19 +69,22 @@ class PayControllerTest {
                 .andExpect(jsonPath("$.data.outOrderNo").value("90010001"))
                 .andExpect(jsonPath("$.data.payBillStatus").value(2));
 
-        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey))
+        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey)
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eventKey").value(eventKey))
                 .andExpect(jsonPath("$.data.eventStatus").value(1))
                 .andExpect(jsonPath("$.data.eventStatusName").value("INIT"));
 
-        mockMvc.perform(post("/api/pay/events/compensate"))
+        mockMvc.perform(post("/api/pay/events/compensate")
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.processedCount").value(1));
 
         verify(orderClient).markOrderPaid(eq(orderNumber), any(OrderPayRequest.class));
 
-        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey))
+        mockMvc.perform(get("/api/pay/events/{eventKey}", eventKey)
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eventStatus").value(3))
                 .andExpect(jsonPath("$.data.eventStatusName").value("SUCCEEDED"));

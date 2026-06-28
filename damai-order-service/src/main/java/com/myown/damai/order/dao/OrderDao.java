@@ -33,6 +33,11 @@ public interface OrderDao {
     List<Order> listOrdersByUserId(Long userId, int limit, int offset);
 
     /**
+     * Lists orders for one user after a create-time and id cursor.
+     */
+    List<Order> listOrdersByUserIdWithCursor(Long userId, Instant cursorCreateTime, Long cursorId, int limit);
+
+    /**
      * Finds an existing payable or paid order for one user and program.
      */
     Optional<Order> findExistingUserProgramOrder(Long userId, Long programId, List<Integer> orderStatuses);

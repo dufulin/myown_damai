@@ -19,10 +19,11 @@ public class OrderKafkaConfig {
      */
     @Bean
     public NewTopic orderCreateTopic(
-            @Value("${damai.order.async.create-topic:damai-order-create}") String topicName
+            @Value("${damai.order.async.create-topic:damai-order-create}") String topicName,
+            @Value("${damai.order.async.topic-partitions:6}") int partitions
     ) {
         return TopicBuilder.name(topicName)
-                .partitions(3)
+                .partitions(partitions)
                 .replicas(1)
                 .build();
     }
@@ -32,10 +33,11 @@ public class OrderKafkaConfig {
      */
     @Bean
     public NewTopic orderCreateRetryTopic(
-            @Value("${damai.order.async.retry-topic:damai-order-create-retry}") String topicName
+            @Value("${damai.order.async.retry-topic:damai-order-create-retry}") String topicName,
+            @Value("${damai.order.async.topic-partitions:6}") int partitions
     ) {
         return TopicBuilder.name(topicName)
-                .partitions(3)
+                .partitions(partitions)
                 .replicas(1)
                 .build();
     }
@@ -45,10 +47,11 @@ public class OrderKafkaConfig {
      */
     @Bean
     public NewTopic orderCreateDeadTopic(
-            @Value("${damai.order.async.dead-topic:damai-order-create-dead}") String topicName
+            @Value("${damai.order.async.dead-topic:damai-order-create-dead}") String topicName,
+            @Value("${damai.order.async.topic-partitions:6}") int partitions
     ) {
         return TopicBuilder.name(topicName)
-                .partitions(3)
+                .partitions(partitions)
                 .replicas(1)
                 .build();
     }

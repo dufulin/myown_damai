@@ -2,6 +2,9 @@ package com.myown.damai.user.entity;
 
 import java.time.Instant;
 
+/**
+ * Represents a short-lived access-token session stored as a one-way token hash.
+ */
 public class UserSession {
 
     private Long id;

@@ -16,6 +16,7 @@
         <result property="idNumber" column="id_number"/>
         <result property="address" column="address"/>
         <result property="status" column="status_name"/>
+        <result property="role" column="role_name"/>
         <result property="createdAt" column="create_time"/>
         <result property="updatedAt" column="edit_time"/>
     </resultMap>
@@ -33,6 +34,7 @@
         u.id_number,
         u.address,
         CASE u.status WHEN 1 THEN 'ACTIVE' ELSE 'DISABLED' END AS status_name,
+        COALESCE(r.role, 'USER') AS role_name,
         u.create_time,
         u.edit_time
     </sql>
@@ -40,6 +42,7 @@
     <select id="selectById" resultMap="UserAccountResultMap">
         SELECT <include refid="UserAccountColumns"/>
         FROM d_user u
+        LEFT JOIN d_user_role r ON r.user_id = u.id
         WHERE u.id = #{id}
     </select>
 
@@ -47,6 +50,7 @@
         SELECT <include refid="UserAccountColumns"/>
         FROM d_user_mobile m
         JOIN d_user u ON u.id = m.user_id
+        LEFT JOIN d_user_role r ON r.user_id = u.id
         WHERE m.mobile = #{mobile}
           AND m.status = 1
           AND u.status = 1
@@ -56,6 +60,7 @@
         SELECT <include refid="UserAccountColumns"/>
         FROM d_user_email e
         JOIN d_user u ON u.id = e.user_id
+        LEFT JOIN d_user_role r ON r.user_id = u.id
         WHERE e.email = #{email}
           AND e.status = 1
           AND u.status = 1
@@ -84,4 +89,18 @@
         VALUES
             (#{userId}, #{email}, #{now}, #{now}, 1)
     </insert>
+
+    <insert id="insertRole">
+        INSERT INTO d_user_role
+            (user_id, role, create_time, edit_time)
+        VALUES
+            (#{userId}, #{role}, #{now}, #{now})
+    </insert>
+
+    <update id="updateRole">
+        UPDATE d_user_role
+        SET role = #{role},
+            edit_time = #{now}
+        WHERE user_id = #{userId}
+    </update>
 </mapper>

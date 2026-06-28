@@ -70,6 +70,27 @@ public class TicketUserService {
     }
 
     /**
+     * Verifies every supplied ticket buyer is active and owned by the specified user.
+     */
+    @Transactional(readOnly = true)
+    public void validateTicketUserOwnership(Long userId, List<Long> ticketUserIds) {
+        for (Long ticketUserId : ticketUserIds.stream().distinct().toList()) {
+            if (ticketUserDao.findByIdAndUserId(ticketUserId, userId).isEmpty()) {
+                LOGGER.warn(
+                        "ticket user ownership validation rejected, userId={}, ticketUserId={}",
+                        userId,
+                        ticketUserId
+                );
+                throw new BusinessException(
+                        "TICKET_USER_NOT_OWNED",
+                        "ticket user is unavailable or does not belong to current user",
+                        HttpStatus.FORBIDDEN
+                );
+            }
+        }
+    }
+
+    /**
      * Normalizes required text fields for ticket buyer storage.
      */
     private String normalizeRequired(String value, String fieldName) {

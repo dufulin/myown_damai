@@ -32,7 +32,7 @@ public class UserSessionDaoImpl implements UserSessionDao {
             UserSessionMapper userSessionMapper,
             RedisStringCacheClient cacheClient,
             @Value("${damai.cache.null-ttl-minutes:5}") long nullTtlMinutes,
-            @Value("${damai.cache.session-ttl-hours:24}") long sessionTtlHours,
+            @Value("${damai.cache.access-session-ttl-minutes:20}") long accessSessionTtlMinutes,
             @Value("${damai.cache.mutex-lock-seconds:5}") long mutexLockSeconds,
             @Value("${damai.cache.mutex-wait-millis:300}") long mutexWaitMillis,
             @Value("${damai.cache.mutex-retry-millis:50}") long mutexRetryMillis
@@ -40,7 +40,7 @@ public class UserSessionDaoImpl implements UserSessionDao {
         this.userSessionMapper = userSessionMapper;
         this.cacheClient = cacheClient;
         this.nullTtl = Duration.ofMinutes(nullTtlMinutes);
-        this.sessionTtl = Duration.ofHours(sessionTtlHours);
+        this.sessionTtl = Duration.ofMinutes(accessSessionTtlMinutes);
         this.mutexLockTtl = Duration.ofSeconds(mutexLockSeconds);
         this.mutexWaitTimeout = Duration.ofMillis(mutexWaitMillis);
         this.mutexRetryInterval = Duration.ofMillis(mutexRetryMillis);
@@ -102,6 +102,14 @@ public class UserSessionDaoImpl implements UserSessionDao {
         }
         cacheClient.put(tokenKey(session.getTokenHash()), String.valueOf(session.getId()), sessionTtl);
         return session;
+    }
+
+    /**
+     * Deletes access-token sessions inactive before the supplied boundary.
+     */
+    @Override
+    public int deleteInactiveBefore(Instant deleteBefore) {
+        return userSessionMapper.deleteInactiveBefore(deleteBefore);
     }
 
     /**

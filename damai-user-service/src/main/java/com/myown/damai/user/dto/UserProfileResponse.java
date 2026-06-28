@@ -1,5 +1,6 @@
 package com.myown.damai.user.dto;
 
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.user.entity.UserAccount;
 
 /**
@@ -12,7 +13,8 @@ public record UserProfileResponse(
         String nickname,
         String mobile,
         String phone,
-        String email
+        String email,
+        UserRole role
 ) {
 
     /**
@@ -26,7 +28,8 @@ public record UserProfileResponse(
                 user.getNickname(),
                 user.getMobile(),
                 user.getPhone(),
-                user.getEmail()
+                user.getEmail(),
+                user.getRole()
         );
     }
 }

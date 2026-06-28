@@ -2,6 +2,8 @@ package com.myown.damai.order.client;
 
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.exception.BusinessException;
+import com.myown.damai.common.auth.UserRole;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +12,7 @@ import org.springframework.cloud.client.circuitbreaker.CircuitBreaker;
 import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,12 +20,15 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 /**
- * Calls the program service inventory APIs used by order state transitions.
+ * Calls the program service for authoritative order snapshots and inventory state transitions.
  */
 @Component
 public class ProgramInventoryClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ProgramInventoryClient.class);
+    private static final ParameterizedTypeReference<ApiResponse<ProgramOrderSnapshot>> ORDER_SNAPSHOT_TYPE =
+            new ParameterizedTypeReference<>() {
+            };
 
     private final RestClient restClient;
     private final CircuitBreaker inventoryCircuitBreaker;
@@ -75,6 +81,56 @@ public class ProgramInventoryClient {
     }
 
     /**
+     * Loads a database-authoritative program snapshot for order creation.
+     */
+    public ProgramOrderSnapshot getOrderSnapshot(
+            Long programId,
+            Long showTimeId,
+            java.util.List<Long> ticketCategoryIds
+    ) {
+        try {
+            ApiResponse<ProgramOrderSnapshot> response = restClient.post()
+                    .uri("/api/programs/{programId}/order-snapshot", programId)
+                    .header(AuthenticatedUserHeader.USER_ROLE, UserRole.SYSTEM.name())
+                    .body(new ProgramOrderSnapshotRequest(showTimeId, ticketCategoryIds))
+                    .retrieve()
+                    .body(ORDER_SNAPSHOT_TYPE);
+            if (response == null || response.data() == null) {
+                throw new BusinessException(
+                        "PROGRAM_ORDER_SNAPSHOT_FAILED",
+                        "program order snapshot is unavailable",
+                        HttpStatus.BAD_GATEWAY
+                );
+            }
+            return response.data();
+        } catch (RestClientResponseException exception) {
+            LOGGER.warn(
+                    "program order snapshot rejected, programId={}, showTimeId={}, status={}",
+                    programId,
+                    showTimeId,
+                    exception.getStatusCode().value()
+            );
+            throw new BusinessException(
+                    "PROGRAM_ORDER_SNAPSHOT_REJECTED",
+                    "program or ticket selection is invalid",
+                    resolveStatus(exception.getStatusCode())
+            );
+        } catch (RestClientException exception) {
+            LOGGER.warn(
+                    "program order snapshot call failed, programId={}, showTimeId={}",
+                    programId,
+                    showTimeId,
+                    exception
+            );
+            throw new BusinessException(
+                    "PROGRAM_INVENTORY_UNAVAILABLE",
+                    "program service unavailable",
+                    HttpStatus.SERVICE_UNAVAILABLE
+            );
+        }
+    }
+
+    /**
      * Sends one inventory action request and normalizes transport failures.
      */
     private void postInventoryAction(Long programId, String action, ProgramInventoryRequest request) {
@@ -120,6 +176,7 @@ public class ProgramInventoryClient {
     private void executeSingleInventoryAction(Long programId, String action, ProgramInventoryRequest request) {
         ApiResponse<?> response = restClient.post()
                 .uri("/api/programs/{programId}/inventory/{action}", programId, action)
+                .header(AuthenticatedUserHeader.USER_ROLE, UserRole.SYSTEM.name())
                 .body(request)
                 .retrieve()
                 .body(ApiResponse.class);

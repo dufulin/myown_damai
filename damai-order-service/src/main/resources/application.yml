@@ -27,11 +27,16 @@ spring:
         max.block.ms: 10000
         request.timeout.ms: 5000
         delivery.timeout.ms: 12000
+        linger.ms: ${DAMAI_ORDER_KAFKA_LINGER_MS:20}
+        batch.size: ${DAMAI_ORDER_KAFKA_BATCH_SIZE:32768}
+        compression.type: ${DAMAI_ORDER_KAFKA_COMPRESSION_TYPE:lz4}
     consumer:
       group-id: ${DAMAI_ORDER_KAFKA_GROUP_ID:damai-order-service}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        max.poll.records: ${DAMAI_ORDER_KAFKA_MAX_POLL_RECORDS:20}
   cloud:
     nacos:
       username: ${DAMAI_NACOS_USERNAME:nacos}
@@ -66,6 +71,13 @@ mybatis:
     map-underscore-to-camel-case: true
 
 damai:
+  user-service:
+    base-url: ${DAMAI_USER_SERVICE_BASE_URL:http://localhost:8081}
+    client:
+      connect-timeout-millis: ${DAMAI_USER_CONNECT_TIMEOUT_MILLIS:1000}
+      read-timeout-millis: ${DAMAI_USER_READ_TIMEOUT_MILLIS:2500}
+      retry-count: ${DAMAI_USER_RETRY_COUNT:1}
+      retry-backoff-millis: ${DAMAI_USER_RETRY_BACKOFF_MILLIS:150}
   program-service:
     base-url: ${DAMAI_PROGRAM_SERVICE_BASE_URL:http://localhost:8082}
     client:
@@ -85,6 +97,8 @@ damai:
       create-topic: ${DAMAI_ORDER_CREATE_TOPIC:damai-order-create}
       retry-topic: ${DAMAI_ORDER_CREATE_RETRY_TOPIC:damai-order-create-retry}
       dead-topic: ${DAMAI_ORDER_CREATE_DEAD_TOPIC:damai-order-create-dead}
+      topic-partitions: ${DAMAI_ORDER_ASYNC_TOPIC_PARTITIONS:6}
+      consumer-concurrency: ${DAMAI_ORDER_ASYNC_CONSUMER_CONCURRENCY:3}
       send-timeout-seconds: ${DAMAI_ORDER_KAFKA_SEND_TIMEOUT_SECONDS:10}
       max-retry-count: ${DAMAI_ORDER_ASYNC_MAX_RETRY_COUNT:3}
     inventory:
@@ -98,6 +112,14 @@ resilience4j:
   circuitbreaker:
     instances:
       orderProgramInventoryClient:
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        ignore-exceptions:
+          - com.myown.damai.common.exception.BusinessException
+      orderTicketUserClient:
         sliding-window-size: 20
         minimum-number-of-calls: 5
         failure-rate-threshold: 50

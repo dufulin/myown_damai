@@ -1,12 +1,18 @@
 package com.myown.damai.user.dao;
 
 import com.myown.damai.user.entity.UserAccount;
+import com.myown.damai.common.auth.UserRole;
 import java.util.Optional;
 
 /**
  * Provides user account persistence operations without exposing MyBatis details to services.
  */
 public interface UserAccountDao {
+
+    /**
+     * Finds a user by primary key.
+     */
+    Optional<UserAccount> findById(Long userId);
 
     /**
      * Checks whether a normal user exists for the given mobile.
@@ -32,4 +38,9 @@ public interface UserAccountDao {
      * Saves a user and its login indexes.
      */
     UserAccount save(UserAccount user);
+
+    /**
+     * Updates or creates the authorization role for one user.
+     */
+    void updateRole(Long userId, UserRole role);
 }

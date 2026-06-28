@@ -1,5 +1,6 @@
 package com.myown.damai.user.entity;
 
+import com.myown.damai.common.auth.UserRole;
 import java.time.Instant;
 
 /**
@@ -19,6 +20,7 @@ public class UserAccount {
     private String idNumber;
     private String address;
     private UserStatus status = UserStatus.ACTIVE;
+    private UserRole role = UserRole.USER;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -158,6 +160,20 @@ public class UserAccount {
 
     public void setStatus(UserStatus status) {
         this.status = status;
+    }
+
+    /**
+     * Returns the account authorization role.
+     */
+    public UserRole getRole() {
+        return role;
+    }
+
+    /**
+     * Sets the account authorization role.
+     */
+    public void setRole(UserRole role) {
+        this.role = role == null ? UserRole.USER : role;
     }
 
     public Instant getCreatedAt() {

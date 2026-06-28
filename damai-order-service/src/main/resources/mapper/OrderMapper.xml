@@ -98,6 +98,21 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <select id="selectOrdersByUserIdWithCursor" resultMap="OrderResultMap">
+        SELECT <include refid="OrderColumns"/>
+        FROM d_order
+        WHERE user_id = #{userId}
+          AND status = 1
+          <if test="cursorCreateTime != null and cursorId != null">
+              AND (
+                  create_order_time &lt; #{cursorCreateTime}
+                  OR (create_order_time = #{cursorCreateTime} AND id &lt; #{cursorId})
+              )
+          </if>
+        ORDER BY create_order_time DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectLatestOrderByUserIdAndProgramId" resultMap="OrderResultMap">
         SELECT <include refid="OrderColumns"/>
         FROM d_order

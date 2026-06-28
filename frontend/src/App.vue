@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 
-const tokenKey = 'damai_user_token'
-const apiBase = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
-const token = ref(localStorage.getItem(tokenKey) || '')
+const apiBase = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8080`
+const token = ref('')
 const currentUser = ref(null)
+let refreshPromise = null
 const mode = ref('login')
 const loading = ref(false)
 const programLoading = ref(false)
@@ -149,33 +149,69 @@ function setNotice(type, text) {
 }
 
 /**
- * Stores or clears the login token.
+ * Keeps the short-lived access token in memory only.
  */
 function saveToken(nextToken) {
   token.value = nextToken || ''
-  if (nextToken) {
-    localStorage.setItem(tokenKey, nextToken)
-    return
-  }
-  localStorage.removeItem(tokenKey)
 }
 
 /**
- * Sends a JSON request to the backend API.
+ * Requests and stores a rotated access token through the HttpOnly refresh cookie.
+ */
+async function refreshAccessToken() {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${apiBase}/api/users/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(payload?.message || 'Session expired. Please log in again.')
+        }
+        saveToken(payload.data.token)
+        currentUser.value = payload.data.user
+        return payload
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+/**
+ * Sends a JSON request and refreshes an expired access token once.
  */
 async function request(path, options = {}) {
+  const { skipAuthRefresh = false, ...fetchOptions } = options
   const headers = {
     'Content-Type': 'application/json',
-    ...(options.headers || {})
+    ...(fetchOptions.headers || {})
   }
 
   if (token.value) {
     headers.Authorization = `Bearer ${token.value}`
   }
 
-  const response = await fetch(`${apiBase}${path}`, { ...options, headers })
+  const response = await fetch(`${apiBase}${path}`, {
+    ...fetchOptions,
+    credentials: 'include',
+    headers
+  })
   const payload = await response.json().catch(() => null)
 
+  if (response.status === 401 && !skipAuthRefresh) {
+    try {
+      await refreshAccessToken()
+      return request(path, { ...fetchOptions, skipAuthRefresh: true })
+    } catch (error) {
+      saveToken('')
+      currentUser.value = null
+      throw error
+    }
+  }
   if (!response.ok) {
     throw new Error(payload?.message || `Request failed: ${response.status}`)
   }
@@ -234,7 +270,8 @@ async function submit() {
 
     const result = await request(path, {
       method: 'POST',
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      skipAuthRefresh: true
     })
 
     saveToken(result.data.token)
@@ -249,16 +286,12 @@ async function submit() {
 }
 
 /**
- * Restores the current user from a saved token.
+ * Restores the session by rotating the server-managed refresh cookie.
  */
 async function loadCurrentUser() {
-  if (!token.value) {
-    return
-  }
   loading.value = true
   try {
-    const result = await request('/api/users/me')
-    currentUser.value = result.data
+    await refreshAccessToken()
     setNotice('success', 'Session restored.')
     await initializeHome()
   } catch (error) {
@@ -317,7 +350,10 @@ async function loadHomePrograms() {
 async function logout() {
   loading.value = true
   try {
-    await request('/api/users/logout', { method: 'POST' })
+    await request('/api/users/logout', {
+      method: 'POST',
+      skipAuthRefresh: true
+    })
     setNotice('success', 'Logged out.')
   } catch (error) {
     setNotice('error', error.message)
@@ -482,25 +518,11 @@ async function createOrder() {
 
   orderLoading.value = true
   try {
-    const orderTicketUsers = orderForm.ticketUserIds.map((ticketUserId) => ({
-      ticketUserId: Number(ticketUserId),
-      seatId: null,
-      // Seat choice is not implemented yet, so the backend receives a stable placeholder.
-      seatInfo: '未选择座位',
-      ticketCategoryId: Number(orderForm.ticketCategoryId),
-      orderPrice: selectedTicketCategory.value.price
-    }))
     const body = {
       programId: selectedProgram.value.id,
-      programItemPicture: selectedProgram.value.itemPicture,
-      programTitle: selectedProgram.value.title,
-      programPlace: selectedProgram.value.place,
-      programShowTime: selectedShowTime.value.showTime,
-      programPermitChooseSeat: selectedProgram.value.permitChooseSeat || 0,
-      distributionMode: '电子票',
-      takeTicketMode: '线上取票',
-      payOrderType: 1,
-      ticketUsers: orderTicketUsers
+      showTimeId: Number(orderForm.showTimeId),
+      ticketCategoryId: Number(orderForm.ticketCategoryId),
+      ticketUserIds: orderForm.ticketUserIds.map(Number)
     }
     const result = await request('/api/orders', {
       method: 'POST',

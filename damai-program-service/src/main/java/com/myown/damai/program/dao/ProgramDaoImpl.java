@@ -92,6 +92,17 @@ public class ProgramDaoImpl implements ProgramDao {
         return programMapper.selectTicketPriceRanges();
     }
 
+    /**
+     * Lists ticket price ranges for selected program ids by delegating to the MyBatis mapper.
+     */
+    @Override
+    public List<ProgramTicketPriceRange> listTicketPriceRangesByProgramIds(List<Long> programIds) {
+        if (programIds.isEmpty()) {
+            return List.of();
+        }
+        return programMapper.selectTicketPriceRangesByProgramIds(programIds);
+    }
+
     @Override
     public ProgramShowTime saveShowTime(ProgramShowTime showTime) {
         programMapper.insertShowTime(showTime);

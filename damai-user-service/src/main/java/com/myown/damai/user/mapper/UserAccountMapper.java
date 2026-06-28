@@ -5,6 +5,9 @@ import java.time.Instant;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+/**
+ * Maps user account, login index, and authorization role operations to MyBatis SQL.
+ */
 @Mapper
 public interface UserAccountMapper {
 
@@ -43,6 +46,24 @@ public interface UserAccountMapper {
     int insertEmailIndex(
             @Param("userId") Long userId,
             @Param("email") String email,
+            @Param("now") Instant now
+    );
+
+    /**
+     * Inserts the default authorization role for a newly registered user.
+     */
+    int insertRole(
+            @Param("userId") Long userId,
+            @Param("role") String role,
+            @Param("now") Instant now
+    );
+
+    /**
+     * Updates an existing user role record.
+     */
+    int updateRole(
+            @Param("userId") Long userId,
+            @Param("role") String role,
             @Param("now") Instant now
     );
 }

@@ -1,10 +1,13 @@
 package com.myown.damai.program.controller;
 
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.program.dto.ProgramCategoryRequest;
 import com.myown.damai.program.dto.ProgramCategoryResponse;
 import com.myown.damai.program.dto.ProgramCreateRequest;
 import com.myown.damai.program.dto.ProgramDetailResponse;
 import com.myown.damai.program.dto.ProgramInventoryRequest;
+import com.myown.damai.program.dto.ProgramOrderSnapshotRequest;
+import com.myown.damai.program.dto.ProgramOrderSnapshotResponse;
 import com.myown.damai.program.dto.ProgramResponse;
 import com.myown.damai.program.dto.SeatBatchCreateRequest;
 import com.myown.damai.program.dto.SeatResponse;
@@ -12,6 +15,7 @@ import com.myown.damai.program.dto.TicketCategoryPriceUpdateRequest;
 import com.myown.damai.program.dto.TicketCategoryResponse;
 import com.myown.damai.program.service.ProgramService;
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.web.AuthenticatedUserHeader;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.slf4j.Logger;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,8 +51,10 @@ public class ProgramController {
      */
     @PostMapping("/categories")
     public ResponseEntity<ApiResponse<ProgramCategoryResponse>> createCategory(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @Valid @RequestBody ProgramCategoryRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("program category create request received, name={}, parentId={}", request.name(), request.parentId());
         ProgramCategoryResponse response = programService.createCategory(request);
         LOGGER.info("program category create request succeeded, categoryId={}", response.id());
@@ -70,8 +77,10 @@ public class ProgramController {
      */
     @PostMapping
     public ResponseEntity<ApiResponse<ProgramDetailResponse>> createProgram(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @Valid @RequestBody ProgramCreateRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("program create request received, title={}", request.title());
         ProgramDetailResponse response = programService.createProgram(request);
         LOGGER.info("program create request succeeded, programId={}", response.program().id());
@@ -145,10 +154,39 @@ public class ProgramController {
     }
 
     /**
+     * Resolves authoritative database values used to create an order snapshot.
+     */
+    @PostMapping("/{programId}/order-snapshot")
+    public ApiResponse<ProgramOrderSnapshotResponse> getOrderSnapshot(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
+            @PathVariable Long programId,
+            @Valid @RequestBody ProgramOrderSnapshotRequest request
+    ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
+        LOGGER.info(
+                "program order snapshot request received, programId={}, showTimeId={}, ticketCategoryCount={}",
+                programId,
+                request.showTimeId(),
+                request.ticketCategoryIds().size()
+        );
+        ProgramOrderSnapshotResponse response = programService.getOrderSnapshot(programId, request);
+        LOGGER.info(
+                "program order snapshot request succeeded, programId={}, showTimeId={}",
+                programId,
+                request.showTimeId()
+        );
+        return ApiResponse.success(response);
+    }
+
+    /**
      * Marks one program offline.
      */
     @PostMapping("/{programId}/offline")
-    public ApiResponse<Void> offlineProgram(@PathVariable Long programId) {
+    public ApiResponse<Void> offlineProgram(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
+            @PathVariable Long programId
+    ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("program offline request received, programId={}", programId);
         programService.offlineProgram(programId);
         LOGGER.info("program offline request succeeded, programId={}", programId);
@@ -160,10 +198,12 @@ public class ProgramController {
      */
     @PostMapping("/{programId}/ticket-categories/{ticketCategoryId}/price")
     public ApiResponse<TicketCategoryResponse> updateTicketCategoryPrice(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @PathVariable Long programId,
             @PathVariable Long ticketCategoryId,
             @Valid @RequestBody TicketCategoryPriceUpdateRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("ticket category price update request received, programId={}, ticketCategoryId={}, price={}", programId, ticketCategoryId, request.price());
         TicketCategoryResponse response = programService.updateTicketCategoryPrice(programId, ticketCategoryId, request);
         LOGGER.info("ticket category price update request succeeded, programId={}, ticketCategoryId={}", programId, ticketCategoryId);
@@ -175,9 +215,11 @@ public class ProgramController {
      */
     @PostMapping("/{programId}/seats")
     public ResponseEntity<ApiResponse<List<SeatResponse>>> createSeats(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @PathVariable Long programId,
             @Valid @RequestBody SeatBatchCreateRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info(
                 "program seat create request received, programId={}, ticketCategoryId={}",
                 programId,
@@ -204,9 +246,11 @@ public class ProgramController {
      */
     @PostMapping("/{programId}/inventory/lock")
     public ApiResponse<Void> lockInventory(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @PathVariable Long programId,
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
         LOGGER.info("program inventory lock request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.lockInventory(programId, request);
         LOGGER.info("program inventory lock request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
@@ -218,9 +262,11 @@ public class ProgramController {
      */
     @PostMapping("/{programId}/inventory/release")
     public ApiResponse<Void> releaseInventory(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @PathVariable Long programId,
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
         LOGGER.info("program inventory release request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.releaseInventory(programId, request);
         LOGGER.info("program inventory release request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
@@ -232,9 +278,11 @@ public class ProgramController {
      */
     @PostMapping("/{programId}/inventory/sold")
     public ApiResponse<Void> markInventorySold(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
             @PathVariable Long programId,
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
         LOGGER.info("program inventory sold request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.markInventorySold(programId, request);
         LOGGER.info("program inventory sold request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());

@@ -53,6 +53,7 @@ spring:
               - OPTIONS
             allowedHeaders:
               - "*"
+            allowCredentials: true
       routes:
         - id: damai-user-service
           uri: lb://damai-user-service
@@ -85,8 +86,34 @@ damai:
       retry-backoff-millis: ${DAMAI_GATEWAY_USER_RETRY_BACKOFF_MILLIS:100}
     rate-limit-enabled: true
     rate-limit:
-      max-requests: 120
-      window-seconds: 60
+      max-requests: ${DAMAI_GATEWAY_RATE_GLOBAL_IP_MAX_REQUESTS:120}
+      window-seconds: ${DAMAI_GATEWAY_RATE_GLOBAL_IP_WINDOW_SECONDS:60}
+      api:
+        max-requests: ${DAMAI_GATEWAY_RATE_API_IP_MAX_REQUESTS:120}
+        window-seconds: ${DAMAI_GATEWAY_RATE_API_IP_WINDOW_SECONDS:60}
+      auth-ip:
+        max-requests: ${DAMAI_GATEWAY_RATE_AUTH_IP_MAX_REQUESTS:20}
+        window-seconds: ${DAMAI_GATEWAY_RATE_AUTH_IP_WINDOW_SECONDS:60}
+      order-ip:
+        max-requests: ${DAMAI_GATEWAY_RATE_ORDER_IP_MAX_REQUESTS:20}
+        window-seconds: ${DAMAI_GATEWAY_RATE_ORDER_IP_WINDOW_SECONDS:60}
+      user:
+        max-requests: ${DAMAI_GATEWAY_RATE_USER_MAX_REQUESTS:120}
+        window-seconds: ${DAMAI_GATEWAY_RATE_USER_WINDOW_SECONDS:60}
+      user-api:
+        read-max-requests: ${DAMAI_GATEWAY_RATE_USER_READ_MAX_REQUESTS:120}
+        write-max-requests: ${DAMAI_GATEWAY_RATE_USER_WRITE_MAX_REQUESTS:30}
+        window-seconds: ${DAMAI_GATEWAY_RATE_USER_API_WINDOW_SECONDS:60}
+      order-user:
+        max-requests: ${DAMAI_GATEWAY_RATE_ORDER_USER_MAX_REQUESTS:5}
+        window-seconds: ${DAMAI_GATEWAY_RATE_ORDER_USER_WINDOW_SECONDS:60}
+      order-program:
+        max-requests: ${DAMAI_GATEWAY_RATE_ORDER_PROGRAM_MAX_REQUESTS:200}
+        window-seconds: ${DAMAI_GATEWAY_RATE_ORDER_PROGRAM_WINDOW_SECONDS:1}
+      order-user-program:
+        max-requests: ${DAMAI_GATEWAY_RATE_ORDER_USER_PROGRAM_MAX_REQUESTS:3}
+        window-seconds: ${DAMAI_GATEWAY_RATE_ORDER_USER_PROGRAM_WINDOW_SECONDS:10}
+      order-body-max-bytes: ${DAMAI_GATEWAY_RATE_ORDER_BODY_MAX_BYTES:65536}
   cache:
     redis-enabled: true
 

@@ -50,6 +50,14 @@ public class OrderDaoImpl implements OrderDao {
     }
 
     /**
+     * Lists orders after the supplied cursor by delegating to the MyBatis mapper.
+     */
+    @Override
+    public List<Order> listOrdersByUserIdWithCursor(Long userId, Instant cursorCreateTime, Long cursorId, int limit) {
+        return orderMapper.selectOrdersByUserIdWithCursor(userId, cursorCreateTime, cursorId, limit);
+    }
+
+    /**
      * Finds an existing user-program order by delegating to the MyBatis mapper.
      */
     @Override

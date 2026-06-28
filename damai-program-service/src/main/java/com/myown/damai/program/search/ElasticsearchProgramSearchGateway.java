@@ -80,17 +80,38 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
                       "programId": { "type": "long" },
                       "minTicketPrice": { "type": "scaled_float", "scaling_factor": 100 },
                       "maxTicketPrice": { "type": "scaled_float", "scaling_factor": 100 },
+                      "programSummary": {
+                        "properties": {
+                          "id": { "type": "long" },
+                          "title": { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+                          "actor": { "type": "text" },
+                          "place": { "type": "text" },
+                          "areaId": { "type": "long" },
+                          "programCategoryId": { "type": "long" },
+                          "parentProgramCategoryId": { "type": "long" },
+                          "highHeat": { "type": "integer" },
+                          "issueTime": { "type": "date" },
+                          "minTicketPrice": { "type": "scaled_float", "scaling_factor": 100 },
+                          "maxTicketPrice": { "type": "scaled_float", "scaling_factor": 100 }
+                        }
+                      },
                       "programDetail": {
                         "properties": {
                           "program": {
                             "properties": {
                               "id": { "type": "long" },
                               "title": { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+                              "actor": { "type": "text" },
+                              "place": { "type": "text" },
+                              "itemPicture": { "type": "keyword", "index": false },
                               "areaId": { "type": "long" },
                               "programCategoryId": { "type": "long" },
                               "parentProgramCategoryId": { "type": "long" },
+                              "permitChooseSeat": { "type": "integer" },
                               "highHeat": { "type": "integer" },
-                              "issueTime": { "type": "date" }
+                              "issueTime": { "type": "date" },
+                              "minTicketPrice": { "type": "scaled_float", "scaling_factor": 100 },
+                              "maxTicketPrice": { "type": "scaled_float", "scaling_factor": 100 }
                             }
                           },
                           "detail": { "type": "text" },
@@ -240,13 +261,19 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("from", (request.pageNumber() - 1) * request.pageSize());
         root.put("size", request.pageSize());
+        ArrayNode sourceFields = root.putArray("_source");
+        sourceFields.add("programSummary");
+        sourceFields.add("minTicketPrice");
+        sourceFields.add("maxTicketPrice");
+        sourceFields.add("programDetail.program");
+        sourceFields.add("program");
 
         ObjectNode bool = objectMapper.createObjectNode();
         ArrayNode must = bool.putArray("must");
         ArrayNode filter = bool.putArray("filter");
         appendKeywordQuery(must, request.keyword());
         appendCompatibleTermFilter(filter, "programDetail.program.areaId", "program.areaId", request.areaId());
-        appendCompatibleTermFilter(filter, "programDetail.program.programCategoryId", "program.programCategoryId", request.programCategoryId());
+        appendCategoryFilter(filter, request.programCategoryId());
         appendShowTimeRangeFilter(filter, request);
         if (must.isEmpty()) {
             ObjectNode matchAll = objectMapper.createObjectNode();
@@ -274,6 +301,9 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         fields.add("programDetail.program.title^4");
         fields.add("programDetail.program.actor^2");
         fields.add("programDetail.program.place^2");
+        fields.add("programSummary.title^4");
+        fields.add("programSummary.actor^2");
+        fields.add("programSummary.place^2");
         fields.add("programDetail.detail");
         fields.add("program.title^4");
         fields.add("program.actor^2");
@@ -294,6 +324,26 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         ArrayNode should = boolBody.putArray("should");
         should.add(termQuery(newField, value));
         should.add(termQuery(oldField, value));
+        boolBody.put("minimum_should_match", 1);
+        filter.add(bool);
+    }
+
+    /**
+     * Appends category filters for both child and parent category ids across old and new document shapes.
+     */
+    private void appendCategoryFilter(ArrayNode filter, Long value) {
+        if (value == null) {
+            return;
+        }
+        ObjectNode bool = objectMapper.createObjectNode();
+        ObjectNode boolBody = bool.putObject("bool");
+        ArrayNode should = boolBody.putArray("should");
+        should.add(termQuery("programSummary.programCategoryId", value));
+        should.add(termQuery("programSummary.parentProgramCategoryId", value));
+        should.add(termQuery("programDetail.program.programCategoryId", value));
+        should.add(termQuery("programDetail.program.parentProgramCategoryId", value));
+        should.add(termQuery("program.programCategoryId", value));
+        should.add(termQuery("program.parentProgramCategoryId", value));
         boolBody.put("minimum_should_match", 1);
         filter.add(bool);
     }
@@ -324,6 +374,7 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         }
         ArrayNode sort = root.putArray("sort");
         if (sortType == 2) {
+            sort.add(sortObject("programSummary.highHeat", "desc", "integer"));
             sort.add(sortObject("programDetail.program.highHeat", "desc", "integer"));
             sort.add(sortObject("program.highHeat", "desc", "integer"));
             sort.add(sortObject("minTicketPrice", "asc", "double"));
@@ -335,6 +386,7 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
             return;
         }
         if (sortType == 4) {
+            sort.add(sortObject("programSummary.issueTime", "desc", "date"));
             sort.add(sortObject("programDetail.program.issueTime", "desc", "date"));
             sort.add(sortObject("program.issueTime", "desc", "date"));
         }
@@ -398,10 +450,34 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         JsonNode hits = objectMapper.readTree(body).path("hits").path("hits");
         List<ProgramResponse> programs = new ArrayList<>();
         for (JsonNode hit : hits) {
-            ProgramDetailResponse detail = readProgramDetailSource(hit.path("_source"));
-            programs.add(detail.program());
+            programs.add(readProgramSummarySource(hit.path("_source")));
         }
         return programs;
+    }
+
+    /**
+     * Reads a program summary from the aggregated read model or compatible old document shapes.
+     */
+    private ProgramResponse readProgramSummarySource(JsonNode source) throws IOException {
+        JsonNode programSummary = source.path("programSummary");
+        if (!programSummary.isMissingNode() && !programSummary.isNull()) {
+            return objectMapper.treeToValue(programSummary, ProgramResponse.class);
+        }
+        ProgramDetailResponse detail = readProgramDetailSource(source);
+        return detail.program().withTicketPriceRange(
+                readDecimal(source.path("minTicketPrice")),
+                readDecimal(source.path("maxTicketPrice"))
+        );
+    }
+
+    /**
+     * Reads one decimal value from an Elasticsearch JSON node.
+     */
+    private java.math.BigDecimal readDecimal(JsonNode value) {
+        if (value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        return value.decimalValue();
     }
 
     /**

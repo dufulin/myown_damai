@@ -10,18 +10,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.order.client.ProgramInventoryClient;
+import com.myown.damai.order.client.ProgramOrderSnapshot;
+import com.myown.damai.order.client.ProgramTicketPriceSnapshot;
+import com.myown.damai.order.client.TicketUserClient;
 import com.myown.damai.order.dao.OrderAsyncMessageDao;
 import com.myown.damai.order.entity.OrderAsyncMessage;
 import com.myown.damai.order.entity.OrderAsyncMessageStatus;
 import java.time.Instant;
+import java.util.List;
+import java.math.BigDecimal;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.when;
 
 /**
  * Verifies order creation, query, cancellation, and timeout cancellation APIs.
@@ -35,6 +46,7 @@ import org.springframework.test.web.servlet.MvcResult;
 class OrderControllerTest {
 
     private static final String USER_ID_HEADER = "X-Damai-User-Id";
+    private static final String USER_ROLE_HEADER = "X-Damai-User-Role";
 
     @Autowired
     private MockMvc mockMvc;
@@ -44,6 +56,30 @@ class OrderControllerTest {
 
     @Autowired
     private OrderAsyncMessageDao orderAsyncMessageDao;
+
+    @MockBean
+    private ProgramInventoryClient programInventoryClient;
+
+    @MockBean
+    private TicketUserClient ticketUserClient;
+
+    /**
+     * Returns a stable database-authoritative snapshot from the mocked program service.
+     */
+    @BeforeEach
+    void setUpProgramSnapshot() {
+        when(programInventoryClient.getOrderSnapshot(anyLong(), anyLong(), anyList()))
+                .thenReturn(new ProgramOrderSnapshot(
+                        20001L,
+                        60001L,
+                        "Database Concert",
+                        "Database Arena",
+                        "https://database.example/poster.png",
+                        Instant.parse("2026-08-01T12:00:00Z"),
+                        1,
+                        List.of(new ProgramTicketPriceSnapshot(50001L, new BigDecimal("680")))
+                ));
+    }
 
     /**
      * Verifies creating, querying, listing, and manually canceling one unpaid order.
@@ -57,6 +93,11 @@ class OrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.orderNumber").value(orderNumber))
                 .andExpect(jsonPath("$.data.orderStatus").value(1))
+                .andExpect(jsonPath("$.data.programTitle").value("Database Concert"))
+                .andExpect(jsonPath("$.data.programPlace").value("Database Arena"))
+                .andExpect(jsonPath("$.data.programItemPicture").value("https://database.example/poster.png"))
+                .andExpect(jsonPath("$.data.orderPrice").value(1360))
+                .andExpect(jsonPath("$.data.ticketUsers[0].orderPrice").value(680))
                 .andExpect(jsonPath("$.data.ticketUsers", hasSize(2)));
 
         mockMvc.perform(get("/api/orders")
@@ -66,6 +107,20 @@ class OrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].orderNumber").value(orderNumber));
+
+        mockMvc.perform(get("/api/orders/cursor")
+                        .header(USER_ID_HEADER, "10001")
+                        .param("pageSize", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orders", hasSize(1)))
+                .andExpect(jsonPath("$.data.orders[0].orderNumber").value(orderNumber))
+                .andExpect(jsonPath("$.data.hasMore").value(false));
+
+        mockMvc.perform(get("/api/orders")
+                        .header(USER_ID_HEADER, "10001")
+                        .param("pageNumber", "101")
+                        .param("pageSize", "100"))
+                .andExpect(status().isBadRequest());
 
         mockMvc.perform(post("/api/orders/{orderNumber}/cancel", orderNumber)
                         .header(USER_ID_HEADER, "10001")
@@ -87,7 +142,8 @@ class OrderControllerTest {
     void timeoutCancelOrder() throws Exception {
         Long orderNumber = createOrder(10002L);
 
-        mockMvc.perform(post("/api/orders/timeout-cancel"))
+        mockMvc.perform(post("/api/orders/timeout-cancel")
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.canceledCount").value(greaterThanOrEqualTo(1)));
 
@@ -107,6 +163,7 @@ class OrderControllerTest {
         Long orderNumber = createOrder(10003L);
 
         mockMvc.perform(post("/api/orders/{orderNumber}/paid", orderNumber)
+                        .header(USER_ROLE_HEADER, "SYSTEM")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -128,10 +185,12 @@ class OrderControllerTest {
     void timeoutOrderCannotBePaid() throws Exception {
         Long orderNumber = createOrder(10006L);
 
-        mockMvc.perform(post("/api/orders/timeout-cancel"))
+        mockMvc.perform(post("/api/orders/timeout-cancel")
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/orders/{orderNumber}/paid", orderNumber)
+                        .header(USER_ROLE_HEADER, "SYSTEM")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -191,30 +250,13 @@ class OrderControllerTest {
                         .content("""
                                 {
                                   "programId": 20001,
-                                  "programItemPicture": "https://example.com/poster.png",
-                                  "programTitle": "Demo Concert",
-                                  "programPlace": "Demo Arena",
-                                  "programShowTime": "2026-08-01T12:00:00Z",
-                                  "programPermitChooseSeat": 1,
-                                  "distributionMode": "E-ticket",
-                                  "takeTicketMode": "Mobile",
-                                  "payOrderType": 1,
-                                  "ticketUsers": [
-                                    {
-                                      "ticketUserId": 30001,
-                                      "seatId": 40001,
-                                      "seatInfo": "A-1",
-                                      "ticketCategoryId": 50001,
-                                      "orderPrice": 680
-                                    },
-                                    {
-                                      "ticketUserId": 30002,
-                                      "seatId": 40002,
-                                      "seatInfo": "A-2",
-                                      "ticketCategoryId": 50001,
-                                      "orderPrice": 680
-                                    }
-                                  ]
+                                  "showTimeId": 60001,
+                                  "ticketCategoryId": 50001,
+                                  "ticketUserIds": [30001, 30002],
+                                  "programTitle": "Tampered Title",
+                                  "programPlace": "Tampered Arena",
+                                  "programItemPicture": "https://attacker.example/poster.png",
+                                  "orderPrice": 1
                                 }
                                 """))
                 .andExpect(status().isCreated())

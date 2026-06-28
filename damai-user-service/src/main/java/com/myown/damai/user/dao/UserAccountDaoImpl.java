@@ -1,5 +1,6 @@
 package com.myown.damai.user.dao;
 
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.cache.DamaiCacheKey;
 import com.myown.damai.common.cache.RedisStringCacheClient;
 import com.myown.damai.user.entity.UserAccount;
@@ -47,6 +48,14 @@ public class UserAccountDaoImpl implements UserAccountDao {
         this.mutexRetryInterval = Duration.ofMillis(mutexRetryMillis);
     }
 
+    /**
+     * Finds one user by primary key.
+     */
+    @Override
+    public Optional<UserAccount> findById(Long userId) {
+        return Optional.ofNullable(userAccountMapper.selectById(userId));
+    }
+
     @Override
     public boolean existsByMobile(String mobile) {
         return findByMobile(mobile).isPresent();
@@ -83,6 +92,7 @@ public class UserAccountDaoImpl implements UserAccountDao {
         userAccountMapper.insert(user);
         Objects.requireNonNull(user.getId(), "generated user id must not be null");
 
+        userAccountMapper.insertRole(user.getId(), user.getRole().name(), now);
         userAccountMapper.insertMobileIndex(user.getId(), user.getMobile(), now);
         cacheClient.put(mobileKey(user.getMobile()), String.valueOf(user.getId()), userTtl);
         if (StringUtils.hasText(user.getEmail())) {
@@ -90,6 +100,18 @@ public class UserAccountDaoImpl implements UserAccountDao {
             cacheClient.put(emailKey(user.getEmail()), String.valueOf(user.getId()), userTtl);
         }
         return user;
+    }
+
+    /**
+     * Updates an existing role or creates one for a legacy user without a role row.
+     */
+    @Override
+    public void updateRole(Long userId, UserRole role) {
+        Instant now = Instant.now();
+        int updated = userAccountMapper.updateRole(userId, role.name(), now);
+        if (updated == 0) {
+            userAccountMapper.insertRole(userId, role.name(), now);
+        }
     }
 
     /**

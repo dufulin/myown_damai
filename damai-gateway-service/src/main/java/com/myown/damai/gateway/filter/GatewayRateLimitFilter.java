@@ -1,19 +1,15 @@
 package com.myown.damai.gateway.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.myown.damai.common.cache.DamaiCacheKey;
 import java.net.InetSocketAddress;
-import java.time.Duration;
-import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -22,38 +18,52 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 /**
- * Limits frequent API requests from the same IP before they reach downstream services.
+ * Applies global, interface-type, and hot-order IP limits before authentication.
  */
 @Component
 public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GatewayRateLimitFilter.class);
 
-    private final ReactiveStringRedisTemplate redisTemplate;
+    private final GatewayRateLimitCounter rateLimitCounter;
     private final ObjectMapper objectMapper;
     private final boolean rateLimitEnabled;
-    private final boolean redisEnabled;
     private final int maxRequests;
     private final long windowSeconds;
-    private final ConcurrentHashMap<String, LocalRateCounter> localCounters = new ConcurrentHashMap<>();
+    private final int apiMaxRequests;
+    private final long apiWindowSeconds;
+    private final int authIpMaxRequests;
+    private final long authIpWindowSeconds;
+    private final int orderIpMaxRequests;
+    private final long orderIpWindowSeconds;
 
     /**
      * Creates the rate limit filter with Redis and local fallback settings.
      */
     public GatewayRateLimitFilter(
-            ReactiveStringRedisTemplate redisTemplate,
+            GatewayRateLimitCounter rateLimitCounter,
             ObjectMapper objectMapper,
             @Value("${damai.gateway.rate-limit-enabled:true}") boolean rateLimitEnabled,
-            @Value("${damai.cache.redis-enabled:true}") boolean redisEnabled,
             @Value("${damai.gateway.rate-limit.max-requests:120}") int maxRequests,
-            @Value("${damai.gateway.rate-limit.window-seconds:60}") long windowSeconds
+            @Value("${damai.gateway.rate-limit.window-seconds:60}") long windowSeconds,
+            @Value("${damai.gateway.rate-limit.api.max-requests:120}") int apiMaxRequests,
+            @Value("${damai.gateway.rate-limit.api.window-seconds:60}") long apiWindowSeconds,
+            @Value("${damai.gateway.rate-limit.auth-ip.max-requests:20}") int authIpMaxRequests,
+            @Value("${damai.gateway.rate-limit.auth-ip.window-seconds:60}") long authIpWindowSeconds,
+            @Value("${damai.gateway.rate-limit.order-ip.max-requests:20}") int orderIpMaxRequests,
+            @Value("${damai.gateway.rate-limit.order-ip.window-seconds:60}") long orderIpWindowSeconds
     ) {
-        this.redisTemplate = redisTemplate;
+        this.rateLimitCounter = rateLimitCounter;
         this.objectMapper = objectMapper;
         this.rateLimitEnabled = rateLimitEnabled;
-        this.redisEnabled = redisEnabled;
         this.maxRequests = maxRequests;
         this.windowSeconds = windowSeconds;
+        this.apiMaxRequests = apiMaxRequests;
+        this.apiWindowSeconds = apiWindowSeconds;
+        this.authIpMaxRequests = authIpMaxRequests;
+        this.authIpWindowSeconds = authIpWindowSeconds;
+        this.orderIpMaxRequests = orderIpMaxRequests;
+        this.orderIpWindowSeconds = orderIpWindowSeconds;
     }
 
     /**
@@ -65,7 +75,7 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Counts requests for the caller IP and rejects requests over the configured limit.
+     * Counts requests across IP dimensions and rejects the first exceeded rule.
      */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -74,28 +84,13 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
         }
 
         String clientIp = resolveClientIp(exchange);
-        return increaseRequestCount(clientIp)
-                .flatMap(count -> {
-                    if (count > maxRequests) {
-                        LOGGER.warn(
-                                "gateway rate limit rejected, ip={}, method={}, path={}, count={}, maxRequests={}",
-                                clientIp,
-                                exchange.getRequest().getMethod(),
-                                exchange.getRequest().getURI().getPath(),
-                                count,
-                                maxRequests
-                        );
-                        return GatewayResponseWriter.writeError(
-                                exchange.getResponse(),
-                                objectMapper,
-                                HttpStatus.TOO_MANY_REQUESTS,
-                                "TOO_MANY_REQUESTS",
-                                "too many requests"
-                        );
-                    }
-                    LOGGER.debug("gateway rate limit passed, ip={}, count={}", clientIp, count);
-                    return chain.filter(exchange);
-                });
+        List<GatewayRateLimitRule> rules = buildIpRules(exchange, clientIp);
+        return rateLimitCounter.firstExceeded(rules)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(exceeded -> exceeded.isPresent()
+                        ? rejectRequest(exchange, clientIp, exceeded.get())
+                        : chain.filter(exchange));
     }
 
     /**
@@ -109,60 +104,98 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Increases the request counter using Redis first and local memory as a fallback.
+     * Builds the global and interface-specific IP rules for one request.
      */
-    private Mono<Long> increaseRequestCount(String clientIp) {
-        if (!redisEnabled) {
-            return Mono.just(increaseLocalRequestCount(clientIp));
+    private List<GatewayRateLimitRule> buildIpRules(ServerWebExchange exchange, String clientIp) {
+        GatewayRateLimitRule globalRule = new GatewayRateLimitRule(
+                "ip:global",
+                clientIp,
+                maxRequests,
+                windowSeconds
+        );
+        String interfaceType = resolveInterfaceType(exchange);
+        GatewayRateLimitRule interfaceRule;
+        if ("auth".equals(interfaceType)) {
+            interfaceRule = new GatewayRateLimitRule(
+                    "ip:auth",
+                    clientIp,
+                    authIpMaxRequests,
+                    authIpWindowSeconds
+            );
+        } else if ("order-create".equals(interfaceType)) {
+            interfaceRule = new GatewayRateLimitRule(
+                    "ip:order-create",
+                    clientIp,
+                    orderIpMaxRequests,
+                    orderIpWindowSeconds
+            );
+        } else {
+            interfaceRule = new GatewayRateLimitRule(
+                    "ip:api:" + interfaceType,
+                    clientIp,
+                    apiMaxRequests,
+                    apiWindowSeconds
+            );
         }
-        return increaseRedisRequestCount(clientIp)
-                .onErrorResume(exception -> {
-                    LOGGER.warn("gateway redis rate counter failed, ip={}", clientIp, exception);
-                    return Mono.just(increaseLocalRequestCount(clientIp));
-                });
+        return List.of(globalRule, interfaceRule);
     }
 
     /**
-     * Increases the Redis fixed-window counter for one IP.
+     * Resolves a stable interface category so unrelated APIs do not share one secondary bucket.
      */
-    private Mono<Long> increaseRedisRequestCount(String clientIp) {
-        String key = rateLimitKey(clientIp);
-        return redisTemplate.opsForValue()
-                .increment(key)
-                .flatMap(count -> {
-                    if (count == 1L) {
-                        return redisTemplate.expire(key, Duration.ofSeconds(windowSeconds)).thenReturn(count);
-                    }
-                    return Mono.just(count);
-                });
+    private String resolveInterfaceType(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getURI().getPath();
+        HttpMethod method = exchange.getRequest().getMethod();
+        if (HttpMethod.POST.equals(method)
+                && ("/api/users/login".equals(path)
+                || "/api/users/register".equals(path)
+                || "/api/users/refresh".equals(path))) {
+            return "auth";
+        }
+        if (HttpMethod.POST.equals(method) && "/api/orders".equals(path)) {
+            return "order-create";
+        }
+        if (path.startsWith("/api/programs")) {
+            return HttpMethod.GET.equals(method) ? "program-read" : "program-write";
+        }
+        if (path.startsWith("/api/orders")) {
+            return HttpMethod.GET.equals(method) ? "order-read" : "order-write";
+        }
+        if (path.startsWith("/api/pay")) {
+            return "pay";
+        }
+        if (path.startsWith("/api/users")) {
+            return HttpMethod.GET.equals(method) ? "user-read" : "user-write";
+        }
+        return "other";
     }
 
     /**
-     * Increases an in-memory fixed-window counter when Redis is disabled or unavailable.
+     * Writes a stable 429 response and exposes the retry window to the caller.
      */
-    private long increaseLocalRequestCount(String clientIp) {
-        long currentWindow = currentWindow();
-        LocalRateCounter counter = localCounters.compute(clientIp, (ip, existingCounter) -> {
-            if (existingCounter == null || existingCounter.window() != currentWindow) {
-                return new LocalRateCounter(currentWindow, 1L);
-            }
-            return new LocalRateCounter(currentWindow, existingCounter.count() + 1L);
-        });
-        return counter.count();
-    }
-
-    /**
-     * Builds a Redis key for the current fixed time window.
-     */
-    private String rateLimitKey(String clientIp) {
-        return DamaiCacheKey.of("gateway", "rate", clientIp, currentWindow());
-    }
-
-    /**
-     * Returns the current fixed-window bucket number.
-     */
-    private long currentWindow() {
-        return Instant.now().getEpochSecond() / windowSeconds;
+    private Mono<Void> rejectRequest(
+            ServerWebExchange exchange,
+            String clientIp,
+            GatewayRateLimitCounter.GatewayRateLimitResult exceeded
+    ) {
+        GatewayRateLimitRule rule = exceeded.rule();
+        exchange.getResponse().getHeaders().set("Retry-After", String.valueOf(Math.max(1L, rule.windowSeconds())));
+        LOGGER.warn(
+                "gateway rate limit rejected, scope={}, ip={}, method={}, path={}, count={}, maxRequests={}",
+                rule.scope(),
+                clientIp,
+                exchange.getRequest().getMethod(),
+                exchange.getRequest().getURI().getPath(),
+                exceeded.count(),
+                rule.maxRequests()
+        );
+        return GatewayResponseWriter.writeError(
+                exchange.getResponse(),
+                objectMapper,
+                HttpStatus.TOO_MANY_REQUESTS,
+                "TOO_MANY_REQUESTS",
+                "too many requests"
+        );
     }
 
     /**
@@ -182,11 +215,5 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
                 .map(InetSocketAddress::getAddress)
                 .map(address -> address.getHostAddress())
                 .orElse("unknown");
-    }
-
-    /**
-     * Stores one local fixed-window request count.
-     */
-    private record LocalRateCounter(long window, long count) {
     }
 }

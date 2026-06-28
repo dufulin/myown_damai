@@ -66,6 +66,11 @@ public interface ProgramDao {
     List<ProgramTicketPriceRange> listTicketPriceRanges();
 
     /**
+     * Lists ticket price ranges for selected programs.
+     */
+    List<ProgramTicketPriceRange> listTicketPriceRangesByProgramIds(List<Long> programIds);
+
+    /**
      * Saves one show time.
      */
     ProgramShowTime saveShowTime(ProgramShowTime showTime);

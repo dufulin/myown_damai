@@ -1,5 +1,6 @@
 package com.myown.damai.pay.client;
 
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
@@ -101,6 +102,7 @@ public class OrderClient {
     private OrderSnapshot executeMarkOrderPaid(Long orderNumber, OrderPayRequest request) {
         ApiResponse<OrderSnapshot> response = applyClientPolicies(webClient.post()
                 .uri(orderServiceUrl + "/api/orders/{orderNumber}/paid", orderNumber)
+                .header(AuthenticatedUserHeader.USER_ROLE, UserRole.SYSTEM.name())
                 .bodyValue(request)
                 .retrieve()
                 .bodyToMono(ORDER_RESPONSE_TYPE))

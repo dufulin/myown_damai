@@ -2,6 +2,7 @@ package com.myown.damai.gateway.filter;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
@@ -18,6 +19,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -66,7 +68,7 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Returns the filter order so authentication runs after rate limiting.
+     * Returns the filter order so authentication runs after the pre-authentication IP limiter.
      */
     @Override
     public int getOrder() {
@@ -83,9 +85,23 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
         }
 
         String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (!isBearerTokenPresent(authorization)) {
+            LOGGER.warn(
+                    "gateway auth rejected because bearer token is missing, method={}, path={}",
+                    exchange.getRequest().getMethod(),
+                    exchange.getRequest().getURI().getPath()
+            );
+            return GatewayResponseWriter.writeError(
+                    exchange.getResponse(),
+                    objectMapper,
+                    HttpStatus.UNAUTHORIZED,
+                    "UNAUTHORIZED",
+                    "missing bearer token"
+            );
+        }
         Mono<Void> authCall = webClient.get()
                 .uri(userServiceUrl + "/api/users/me")
-                .header(HttpHeaders.AUTHORIZATION, authorization == null ? "" : authorization)
+                .header(HttpHeaders.AUTHORIZATION, authorization)
                 .exchangeToMono(response -> handleAuthResponse(exchange, chain, response))
                 .timeout(userServiceTimeout);
         if (userServiceRetryCount > 0) {
@@ -95,6 +111,15 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
                 authCall,
                 exception -> handleAuthFallback(exchange, exception)
         );
+    }
+
+    /**
+     * Checks that a nonblank bearer credential is present before calling the user service.
+     */
+    private boolean isBearerTokenPresent(String authorization) {
+        return StringUtils.hasText(authorization)
+                && authorization.startsWith("Bearer ")
+                && StringUtils.hasText(authorization.substring("Bearer ".length()));
     }
 
     /**
@@ -137,18 +162,21 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
             GatewayFilterChain chain,
             String body
     ) {
-        String userId = resolveUserId(body);
+        AuthenticatedIdentity identity = resolveIdentity(body);
         LOGGER.info(
-                "gateway auth passed, method={}, path={}, userId={}",
+                "gateway auth passed, method={}, path={}, userId={}, role={}",
                 exchange.getRequest().getMethod(),
                 exchange.getRequest().getURI().getPath(),
-                userId
+                identity.userId(),
+                identity.role()
         );
         ServerHttpRequest request = exchange.getRequest()
                 .mutate()
                 .headers(headers -> {
                     headers.remove(AuthenticatedUserHeader.USER_ID);
-                    headers.set(AuthenticatedUserHeader.USER_ID, userId);
+                    headers.remove(AuthenticatedUserHeader.USER_ROLE);
+                    headers.set(AuthenticatedUserHeader.USER_ID, identity.userId());
+                    headers.set(AuthenticatedUserHeader.USER_ROLE, identity.role().name());
                 })
                 .build();
         return chain.filter(exchange.mutate().request(request).build());
@@ -207,11 +235,16 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Checks whether the request is a public login or registration API.
+     * Checks whether the request is a public authentication lifecycle API.
      */
     private boolean isPublicUserEndpoint(String path, HttpMethod method) {
         return HttpMethod.POST.equals(method)
-                && ("/api/users/login".equals(path) || "/api/users/register".equals(path));
+                && (
+                        "/api/users/login".equals(path)
+                                || "/api/users/register".equals(path)
+                                || "/api/users/refresh".equals(path)
+                                || "/api/users/logout".equals(path)
+                );
     }
 
     /**
@@ -225,16 +258,23 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     /**
      * Resolves the authenticated user id from the user service profile response.
      */
-    private String resolveUserId(String responseBody) {
+    private AuthenticatedIdentity resolveIdentity(String responseBody) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             JsonNode userIdNode = root.path("data").path("id");
             if (userIdNode.isIntegralNumber()) {
-                return userIdNode.asText();
+                UserRole role = UserRole.fromNullable(root.path("data").path("role").asText(null));
+                return new AuthenticatedIdentity(userIdNode.asText(), role);
             }
         } catch (Exception exception) {
             LOGGER.warn("gateway auth response parse failed", exception);
         }
         throw new IllegalStateException("user id is missing from auth response");
+    }
+
+    /**
+     * Holds the trusted identity returned by the user service.
+     */
+    private record AuthenticatedIdentity(String userId, UserRole role) {
     }
 }

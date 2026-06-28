@@ -79,6 +79,11 @@ public interface ProgramMapper {
     List<ProgramTicketPriceRange> selectTicketPriceRanges();
 
     /**
+     * Lists minimum and maximum ticket prices for selected programs.
+     */
+    List<ProgramTicketPriceRange> selectTicketPriceRangesByProgramIds(@Param("programIds") List<Long> programIds);
+
+    /**
      * Inserts one show time.
      */
     int insertShowTime(ProgramShowTime showTime);

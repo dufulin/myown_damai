@@ -55,14 +55,23 @@ mybatis:
 
 damai:
   auth:
-    session-ttl-hours: 24
+    access-token-ttl-minutes: ${DAMAI_ACCESS_TOKEN_TTL_MINUTES:15}
+    refresh-token-ttl-days: ${DAMAI_REFRESH_TOKEN_TTL_DAYS:7}
+    cleanup-cron: "${DAMAI_TOKEN_CLEANUP_CRON:0 0 * * * *}"
+    cleanup-zone: ${DAMAI_TOKEN_CLEANUP_ZONE:Asia/Shanghai}
+    cleanup-retention-hours: ${DAMAI_TOKEN_CLEANUP_RETENTION_HOURS:24}
+    refresh-cookie:
+      name: ${DAMAI_REFRESH_COOKIE_NAME:damai_refresh_token}
+      path: /api/users
+      secure: ${DAMAI_REFRESH_COOKIE_SECURE:false}
+      same-site: ${DAMAI_REFRESH_COOKIE_SAME_SITE:Lax}
   cache:
     redis-enabled: true
     null-ttl-minutes: 5
     ttl-jitter-min-seconds: 0
     ttl-jitter-max-seconds: 60
     user-ttl-hours: 6
-    session-ttl-hours: 24
+    access-session-ttl-minutes: ${DAMAI_ACCESS_SESSION_CACHE_TTL_MINUTES:20}
     mutex-lock-seconds: 5
     mutex-wait-millis: 300
     mutex-retry-millis: 50

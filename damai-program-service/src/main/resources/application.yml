@@ -75,6 +75,7 @@ damai:
     ttl-jitter-min-seconds: 0
     ttl-jitter-max-seconds: 60
     program-detail-ttl-hours: 2
+    program-read-model-ttl-minutes: 5
     mutex-lock-seconds: 5
     mutex-wait-millis: 500
     mutex-retry-millis: 50
@@ -87,6 +88,7 @@ damai:
     index-name: ${DAMAI_ES_PROGRAM_INDEX:damai_program_detail}
     connect-timeout-seconds: 2
     request-timeout-seconds: 5
+    max-result-window: ${DAMAI_ES_MAX_RESULT_WINDOW:10000}
     bloom:
       bit-size: 1048576
       hash-count: 5

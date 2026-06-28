@@ -39,6 +39,16 @@ public interface OrderMapper {
     );
 
     /**
+     * Lists normal orders for one user after a create-time and id cursor.
+     */
+    List<Order> selectOrdersByUserIdWithCursor(
+            @Param("userId") Long userId,
+            @Param("cursorCreateTime") Instant cursorCreateTime,
+            @Param("cursorId") Long cursorId,
+            @Param("limit") int limit
+    );
+
+    /**
      * Selects the latest non-terminal order for one user and one program.
      */
     Order selectLatestOrderByUserIdAndProgramId(

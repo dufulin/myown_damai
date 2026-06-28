@@ -57,11 +57,13 @@ public class OrderAsyncConsumer {
     @KafkaListener(topics = {
             "${damai.order.async.create-topic:damai-order-create}",
             "${damai.order.async.retry-topic:damai-order-create-retry}"
-    })
+    }, concurrency = "${damai.order.async.consumer-concurrency:3}")
     public void consumeCreateOrderMessage(
             String payload,
             @Header(name = KafkaHeaders.RECEIVED_TOPIC) String topic,
-            @Header(name = KafkaHeaders.RECEIVED_KEY, required = false) String kafkaKey
+            @Header(name = KafkaHeaders.RECEIVED_KEY, required = false) String kafkaKey,
+            @Header(name = KafkaHeaders.RECEIVED_PARTITION, required = false) Integer partition,
+            @Header(name = KafkaHeaders.OFFSET, required = false) Long offset
     ) {
         try {
             OrderAsyncCreateMessage message = objectMapper.readValue(payload, OrderAsyncCreateMessage.class);
@@ -69,7 +71,16 @@ public class OrderAsyncConsumer {
             if (!claimMessage(message)) {
                 return;
             }
-            LOGGER.info("order async create message received, topic={}, messageKey={}, orderNumber={}", topic, message.messageKey(), message.orderNumber());
+            LOGGER.info(
+                    "order async create message received, topic={}, kafkaKey={}, partition={}, offset={}, messageKey={}, orderNumber={}, programId={}",
+                    topic,
+                    kafkaKey,
+                    partition,
+                    offset,
+                    message.messageKey(),
+                    message.orderNumber(),
+                    message.request().programId()
+            );
             orderService.createOrderFromAsyncMessage(message);
             orderAsyncMessageDao.markSucceeded(message.messageKey());
             LOGGER.info("order async create message handled, messageKey={}, orderNumber={}", message.messageKey(), message.orderNumber());

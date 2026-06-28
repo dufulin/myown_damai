@@ -1,15 +1,17 @@
 package com.myown.damai.program.search;
 
 import com.myown.damai.program.dto.ProgramDetailResponse;
+import com.myown.damai.program.dto.ProgramResponse;
 import java.math.BigDecimal;
 
 /**
- * Represents the Elasticsearch document for one program detail.
+ * Represents the Elasticsearch aggregated read model for one program.
  */
 public record ProgramSearchDocument(
         Long programId,
         BigDecimal minTicketPrice,
         BigDecimal maxTicketPrice,
+        ProgramResponse programSummary,
         ProgramDetailResponse programDetail
 ) {
 
@@ -22,6 +24,9 @@ public record ProgramSearchDocument(
             BigDecimal maxTicketPrice,
             ProgramDetailResponse programDetail
     ) {
-        return new ProgramSearchDocument(programId, minTicketPrice, maxTicketPrice, programDetail);
+        BigDecimal resolvedMinTicketPrice = minTicketPrice == null ? programDetail.program().minTicketPrice() : minTicketPrice;
+        BigDecimal resolvedMaxTicketPrice = maxTicketPrice == null ? programDetail.program().maxTicketPrice() : maxTicketPrice;
+        ProgramResponse summary = programDetail.program().withTicketPriceRange(resolvedMinTicketPrice, resolvedMaxTicketPrice);
+        return new ProgramSearchDocument(programId, resolvedMinTicketPrice, resolvedMaxTicketPrice, summary, programDetail);
     }
 }

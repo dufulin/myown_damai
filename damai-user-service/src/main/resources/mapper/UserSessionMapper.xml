@@ -22,6 +22,7 @@
             <result property="idNumber" column="id_number"/>
             <result property="address" column="address"/>
             <result property="status" column="status_name"/>
+            <result property="role" column="role_name"/>
             <result property="createdAt" column="user_create_time"/>
             <result property="updatedAt" column="user_edit_time"/>
         </association>
@@ -45,6 +46,7 @@
         u.id_number,
         u.address,
         CASE u.status WHEN 1 THEN 'ACTIVE' ELSE 'DISABLED' END AS status_name,
+        COALESCE(r.role, 'USER') AS role_name,
         u.create_time AS user_create_time,
         u.edit_time AS user_edit_time
     </sql>
@@ -53,6 +55,7 @@
         SELECT <include refid="SessionJoinColumns"/>
         FROM d_user_sessions s
         JOIN d_user u ON u.id = s.user_id
+        LEFT JOIN d_user_role r ON r.user_id = u.id
         WHERE s.id = #{id}
     </select>
 
@@ -60,6 +63,7 @@
         SELECT <include refid="SessionJoinColumns"/>
         FROM d_user_sessions s
         JOIN d_user u ON u.id = s.user_id
+        LEFT JOIN d_user_role r ON r.user_id = u.id
         WHERE s.token_hash = #{tokenHash}
     </select>
 
@@ -77,4 +81,10 @@
             revoked_at = #{revokedAt}
         WHERE id = #{id}
     </update>
+
+    <delete id="deleteInactiveBefore">
+        DELETE FROM d_user_sessions
+        WHERE expires_at &lt; #{deleteBefore}
+           OR (revoked_at IS NOT NULL AND revoked_at &lt; #{deleteBefore})
+    </delete>
 </mapper>

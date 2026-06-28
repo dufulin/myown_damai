@@ -1,10 +1,7 @@
 package com.myown.damai.order.dto;
 
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -12,16 +9,10 @@ import java.util.List;
  */
 public record OrderCreateRequest(
         @NotNull Long programId,
-        String programItemPicture,
+        @NotNull Long showTimeId,
+        @NotNull Long ticketCategoryId,
         Long userId,
-        @Size(max = 512) String programTitle,
-        @Size(max = 100) String programPlace,
-        Instant programShowTime,
-        Integer programPermitChooseSeat,
-        @Size(max = 256) String distributionMode,
-        @Size(max = 256) String takeTicketMode,
-        Integer payOrderType,
-        @NotEmpty List<@Valid OrderTicketUserRequest> ticketUsers
+        @NotEmpty List<@NotNull Long> ticketUserIds
 ) {
 
     /**
@@ -30,16 +21,10 @@ public record OrderCreateRequest(
     public OrderCreateRequest withUserId(Long authenticatedUserId) {
         return new OrderCreateRequest(
                 programId,
-                programItemPicture,
+                showTimeId,
+                ticketCategoryId,
                 authenticatedUserId,
-                programTitle,
-                programPlace,
-                programShowTime,
-                programPermitChooseSeat,
-                distributionMode,
-                takeTicketMode,
-                payOrderType,
-                ticketUsers
+                ticketUserIds
         );
     }
 }

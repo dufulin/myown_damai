@@ -18,7 +18,7 @@ http://127.0.0.1:5173
 
 ## 服务模块
 
-1. `damai-common`：公共响应对象、业务异常、全局异常处理、身份请求头、Redis 缓存工具、布隆过滤器。
+1. `damai-common`：公共响应对象、业务异常、全局异常处理、身份与角色请求头、Redis 缓存工具、布隆过滤器。
 2. `damai-gateway-service`：网关服务，默认端口 `8080`。
 3. `damai-user-service`：用户服务，默认端口 `8081`。
 4. `damai-program-service`：节目服务，默认端口 `8082`。
@@ -32,12 +32,17 @@ http://127.0.0.1:5173
 
 1. 统一转发 `/api/users/**`、`/api/programs/**`、`/api/orders/**`、`/api/pay/**`。
 2. 除注册、登录、预检请求和支付宝异步通知外，其他接口都需要登录态。
-3. 调用用户服务校验 token，并将可信用户 ID 写入 `X-Damai-User-Id` 请求头透传到下游。
+3. 调用用户服务校验 token，并将可信用户 ID、角色写入 `X-Damai-User-Id`、`X-Damai-User-Role` 请求头透传到下游。
 4. 下游订单、支付、购票人接口只信任网关透传身份，不信任前端传入的 `userId`。
-5. 支持同一 IP 的基础访问频率限制，降低简单防刷风险。
+5. 鉴权前按全局 IP、认证接口 IP、普通接口类型 IP 和下单接口 IP 分层限流，避免恶意请求先打满用户鉴权服务。
 6. 接入 Nacos 服务发现，支持通过服务名路由。
 7. 网关调用用户服务已配置连接超时、响应超时、有限重试和 Resilience4j 熔断降级。
 8. 所有网关过滤关键路径已添加必要日志。
+9. 支持 `USER`、`OPERATOR`、`ADMIN` 角色，并通过集中式 RBAC 路由策略限制敏感接口。
+10. 节目创建、分类创建、下架、改价、座位初始化、手动超时取消和支付补偿仅允许运营或管理员访问。
+11. 用户角色调整仅允许管理员访问；库存流转和支付回写订单接口禁止通过公网网关访问，只供服务间调用。
+12. 鉴权后按登录用户、接口类型、下单用户、节目 ID、用户与节目组合维度限流，限制账号跨 IP 和热点节目跨账号突发流量。
+13. 热门下单限流会读取并恢复请求体中的 `programId`，超限返回 HTTP 429 和 `Retry-After`；Redis 不可用时降级为带过期清理的本地计数器。
 
 ### 用户服务
 
@@ -45,11 +50,15 @@ http://127.0.0.1:5173
 2. 支持手机号或邮箱登录。
 3. 支持获取当前登录用户信息。
 4. 支持用户退出登录。
-5. 登录 token 支持生成、Redis/数据库持久化和吊销。
+5. 登录采用短期 access token（默认 15 分钟）与 refresh token（默认 7 天）的双 token 模式。
 6. 密码使用 BCrypt 加密存储。
 7. 支持购票人管理：查询、添加、删除实名购票人。
 8. Redis 缓存手机号、邮箱和 token 查询结果，并支持空值缓存、TTL 随机抖动、互斥重建，降低缓存穿透和缓存击穿风险。
 9. 接口和关键业务逻辑已添加 SLF4J 日志。
+10. refresh token 仅以哈希形式入库，通过 HttpOnly Cookie 下发，并在每次刷新时原子轮换，旧 token 不可重放。
+11. 支持定时清理过期或已撤销的 access token、refresh token 记录。
+12. 用户角色存储于 `d_user_role`，新用户默认 `USER`，管理员可将用户调整为 `OPERATOR` 或 `ADMIN`。
+13. 提供仅供订单服务调用的购票人归属校验接口，阻止使用其他用户或已删除的购票人 ID 下单。
 
 ### 节目服务
 
@@ -73,6 +82,7 @@ http://127.0.0.1:5173
 13. 支持库存闭环接口：锁定库存/座位、释放库存/座位、支付成功后转已售。
 14. 座位状态支持可售、锁定、已售、释放流转。
 15. 接口和关键业务逻辑已添加 SLF4J 日志。
+16. 提供仅供订单服务调用的下单快照接口，直接从节目数据库校验节目、场次、票档归属并返回实时票价。
 
 ### 订单服务
 
@@ -92,6 +102,9 @@ http://127.0.0.1:5173
 14. 已引入订单状态机，统一管理待创建、待支付、已支付、已取消、已超时、已退款等状态流转，避免多处直接改状态。
 15. 调用节目库存服务已配置连接超时、读取超时、有限重试和 Resilience4j 熔断降级。
 16. 接口和关键业务逻辑已添加 SLF4J 日志。
+17. 下单接口只接收 `programId`、`showTimeId`、`ticketCategoryId` 和购票人 ID；标题、场馆、图片、演出时间和票价均由后端权威节目快照生成。
+18. 主订单总价由数据库票档价格乘购票人数计算，Kafka 异步消息携带后端生成的可信快照，忽略前端伪造价格和展示字段。
+19. 异步消息发送前会调用用户服务校验购票人归属，用户服务调用配置了超时、有限重试和 Resilience4j 熔断降级。
 
 ### 支付服务
 
@@ -131,7 +144,7 @@ http://127.0.0.1:5173
 13. 个人中心支持刷新订单、取消未支付订单。
 14. 个人中心支持添加、刷新、删除购票人。
 15. 未支付订单支持点击“支付宝支付”，当前会模拟支付成功并刷新订单状态。
-16. 浏览器本地保存 token，并在刷新后尝试恢复登录态。
+16. access token 仅保存在浏览器内存，页面刷新后通过 HttpOnly refresh Cookie 恢复登录态；接口 401 时自动刷新并重试一次。
 
 ## 后端接口
 
@@ -155,6 +168,13 @@ POST /api/users/register
 POST /api/users/login
 ```
 
+刷新 access token：
+
+```http
+POST /api/users/refresh
+Cookie: damai_refresh_token=<HttpOnly Cookie>
+```
+
 退出登录：
 
 ```http
@@ -167,6 +187,16 @@ Authorization: Bearer <token>
 ```http
 GET /api/users/me
 Authorization: Bearer <token>
+```
+
+管理员修改用户角色：
+
+```http
+PUT /api/users/{userId}/role
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+
+{"role":"OPERATOR"}
 ```
 
 查询购票人：
@@ -293,6 +323,14 @@ POST /api/programs/{programId}/inventory/sold
 ```http
 POST /api/orders
 Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "programId": 1,
+  "showTimeId": 10,
+  "ticketCategoryId": 100,
+  "ticketUserIds": [1000, 1001]
+}
 ```
 
 查询订单详情：
@@ -462,7 +500,8 @@ damai-pay-service/src/main/resources/schema.sql
 14. Resilience4j
 15. H2 测试数据库
 16. JUnit + MockMvc 接口测试
-17. SLF4J 日志
+17. Spring Boot + MyBatis 事务集成测试与并发测试
+18. SLF4J 日志
 
 ### 前端
 
@@ -538,6 +577,10 @@ npm run build
 14. 支付本地事件补偿、重试和状态查询。
 15. 网关登录态过滤、身份透传和 IP 访问频率限制。
 16. 服务间调用超时、重试和熔断配置。
+17. Kafka 订单消息重复投递时的消费幂等和消息状态追踪。
+18. 最后一张票被并发预占时的原子扣减与防超卖。
+19. 支付确认和用户取消并发竞争时的订单状态机单一终态。
+20. 网关使用用户服务身份覆盖客户端伪造的用户 ID 和角色请求头。
 
 ## 后续可扩展方向
 
@@ -547,4 +590,4 @@ npm run build
 4. 增加更细粒度的 RBAC 权限控制。
 5. 增加库存流水表和对账任务，便于排查库存异常。
 6. 增加链路追踪、指标监控和告警，例如 Micrometer、Prometheus、Grafana。
-7. 为 Kafka、ES、Redis 增加更完整的集成测试或 Testcontainers 测试。
+7. 为真实 Kafka broker、ES、Redis 增加 Testcontainers 级基础设施集成测试。

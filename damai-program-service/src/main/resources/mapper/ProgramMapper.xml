@@ -238,6 +238,19 @@
         GROUP BY tc.program_id
     </select>
 
+    <select id="selectTicketPriceRangesByProgramIds" resultMap="ProgramTicketPriceRangeResultMap">
+        SELECT tc.program_id,
+               MIN(tc.price) AS min_price,
+               MAX(tc.price) AS max_price
+        FROM d_ticket_category tc
+        WHERE tc.status = 1
+          AND tc.program_id IN
+          <foreach collection="programIds" item="programId" open="(" separator="," close=")">
+              #{programId}
+          </foreach>
+        GROUP BY tc.program_id
+    </select>
+
     <insert id="insertShowTime" parameterType="com.myown.damai.program.entity.ProgramShowTime"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO d_program_show_time

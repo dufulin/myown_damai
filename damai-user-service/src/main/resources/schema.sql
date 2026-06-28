@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS d_user_mobile (
     CONSTRAINT fk_d_user_mobile_user_id FOREIGN KEY (user_id) REFERENCES d_user (id)
 );
 
+CREATE TABLE IF NOT EXISTS d_user_role (
+    user_id BIGINT NOT NULL,
+    role VARCHAR(32) NOT NULL DEFAULT 'USER',
+    create_time DATETIME(6) NOT NULL,
+    edit_time DATETIME(6) NOT NULL,
+    PRIMARY KEY (user_id),
+    INDEX idx_d_user_role_role (role, user_id),
+    CONSTRAINT fk_d_user_role_user_id FOREIGN KEY (user_id) REFERENCES d_user (id)
+);
+
 CREATE TABLE IF NOT EXISTS d_user_email (
     id BIGINT NOT NULL AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
@@ -52,6 +62,7 @@ CREATE TABLE IF NOT EXISTS d_ticket_user (
     edit_time DATETIME(6) NOT NULL,
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
+    INDEX idx_d_ticket_user_user_status_time (user_id, status, create_time, id),
     CONSTRAINT fk_d_ticket_user_user_id FOREIGN KEY (user_id) REFERENCES d_user (id)
 );
 
@@ -63,6 +74,20 @@ CREATE TABLE IF NOT EXISTS d_user_sessions (
     expires_at DATETIME(6) NOT NULL,
     revoked_at DATETIME(6),
     PRIMARY KEY (id),
+    INDEX idx_d_user_sessions_expiry (expires_at, revoked_at),
     CONSTRAINT uk_d_user_sessions_token_hash UNIQUE (token_hash),
     CONSTRAINT fk_d_user_sessions_user_id FOREIGN KEY (user_id) REFERENCES d_user (id)
+);
+
+CREATE TABLE IF NOT EXISTS d_user_refresh_tokens (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    token_hash VARCHAR(88) NOT NULL,
+    user_id BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    revoked_at DATETIME(6),
+    PRIMARY KEY (id),
+    INDEX idx_d_user_refresh_tokens_expiry (expires_at, revoked_at),
+    CONSTRAINT uk_d_user_refresh_tokens_token_hash UNIQUE (token_hash),
+    CONSTRAINT fk_d_user_refresh_tokens_user_id FOREIGN KEY (user_id) REFERENCES d_user (id)
 );

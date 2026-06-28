@@ -71,8 +71,10 @@ CREATE TABLE IF NOT EXISTS d_program (
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     INDEX idx_d_program_group_id (program_group_id),
-    INDEX idx_d_program_area_id (area_id),
-    INDEX idx_d_program_issue_time (issue_time),
+    INDEX idx_d_program_area_status_heat_time (area_id, status, program_status, high_heat, issue_time),
+    INDEX idx_d_program_category_status_heat_time (program_category_id, status, program_status, high_heat, issue_time),
+    INDEX idx_d_program_parent_category_status_heat_time (parent_program_category_id, status, program_status, high_heat, issue_time),
+    INDEX idx_d_program_issue_time (status, program_status, issue_time),
     CONSTRAINT fk_d_program_group_id FOREIGN KEY (program_group_id) REFERENCES d_program_group (id),
     CONSTRAINT fk_d_program_category_id FOREIGN KEY (program_category_id) REFERENCES d_program_category (id),
     CONSTRAINT fk_d_program_parent_category_id FOREIGN KEY (parent_program_category_id) REFERENCES d_program_category (id)
@@ -90,8 +92,8 @@ CREATE TABLE IF NOT EXISTS d_program_show_time (
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     INDEX idx_d_program_show_time_program_id (program_id),
-    INDEX idx_d_program_show_time_show_time (show_time),
-    INDEX idx_d_program_show_time_show_day_time (show_day_time),
+    INDEX idx_d_program_show_time_show_time (status, show_time),
+    INDEX idx_d_program_show_time_show_day_time (status, show_day_time),
     CONSTRAINT fk_d_program_show_time_program_id FOREIGN KEY (program_id) REFERENCES d_program (id)
 );
 
@@ -107,6 +109,8 @@ CREATE TABLE IF NOT EXISTS d_ticket_category (
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     INDEX idx_d_ticket_category_program_id (program_id),
+    INDEX idx_d_ticket_category_program_ticket (program_id, id, status),
+    INDEX idx_d_ticket_category_program_price (program_id, status, price),
     CONSTRAINT fk_d_ticket_category_program_id FOREIGN KEY (program_id) REFERENCES d_program (id)
 );
 
@@ -124,6 +128,7 @@ CREATE TABLE IF NOT EXISTS d_seat (
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     INDEX idx_d_seat_program_id (program_id),
+    INDEX idx_d_seat_program_ticket_status (program_id, ticket_category_id, sell_status, status),
     INDEX idx_d_seat_row_code (row_code),
     INDEX idx_d_seat_col_code (col_code),
     CONSTRAINT fk_d_seat_program_id FOREIGN KEY (program_id) REFERENCES d_program (id),

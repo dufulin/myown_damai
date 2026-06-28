@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS d_order (
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
     CONSTRAINT uk_d_order_order_number UNIQUE (order_number),
-    INDEX idx_d_order_user_id (user_id),
+    INDEX idx_d_order_user_status_time (user_id, status, create_order_time, id),
+    INDEX idx_d_order_user_program_status (user_id, program_id, status, order_status, create_order_time, id),
     INDEX idx_d_order_program_id (program_id),
-    INDEX idx_d_order_status_expire_time (order_status, expire_time)
+    INDEX idx_d_order_status_expire_time (order_status, status, expire_time)
 );
 
 CREATE TABLE IF NOT EXISTS d_order_ticket_user (
@@ -47,8 +48,9 @@ CREATE TABLE IF NOT EXISTS d_order_ticket_user (
     edit_time DATETIME(6) NOT NULL,
     status TINYINT NOT NULL DEFAULT 1,
     PRIMARY KEY (id),
-    INDEX idx_d_order_ticket_user_order_number (order_number),
+    INDEX idx_d_order_ticket_user_order_number (order_number, status, id),
     INDEX idx_d_order_ticket_user_user_id (user_id),
+    INDEX idx_d_order_ticket_user_program_ticket_category (program_id, ticket_category_id, status),
     INDEX idx_d_order_ticket_user_ticket_user_id (ticket_user_id),
     INDEX idx_d_order_ticket_user_create_order_time (create_order_time)
 );

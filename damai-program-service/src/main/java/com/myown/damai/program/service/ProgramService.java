@@ -1,6 +1,7 @@
 package com.myown.damai.program.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myown.damai.common.cache.DamaiCacheKey;
 import com.myown.damai.common.cache.RedisStringCacheClient;
@@ -12,6 +13,9 @@ import com.myown.damai.program.dto.ProgramCreateRequest;
 import com.myown.damai.program.dto.ProgramDetailResponse;
 import com.myown.damai.program.dto.ProgramInventoryItemRequest;
 import com.myown.damai.program.dto.ProgramInventoryRequest;
+import com.myown.damai.program.dto.ProgramOrderSnapshotRequest;
+import com.myown.damai.program.dto.ProgramOrderSnapshotResponse;
+import com.myown.damai.program.dto.ProgramOrderTicketPriceResponse;
 import com.myown.damai.program.dto.ProgramResponse;
 import com.myown.damai.program.dto.ProgramShowTimeRequest;
 import com.myown.damai.program.dto.ProgramShowTimeResponse;
@@ -64,6 +68,8 @@ public class ProgramService {
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Shanghai");
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_SEAT_BATCH_SIZE = 5000;
+    private static final TypeReference<List<ProgramResponse>> PROGRAM_RESPONSE_LIST_TYPE = new TypeReference<>() {
+    };
 
     private final ProgramDao programDao;
     private final ProgramSearchGateway programSearchGateway;
@@ -73,9 +79,11 @@ public class ProgramService {
     private final ObjectMapper objectMapper;
     private final Duration nullTtl;
     private final Duration programDetailTtl;
+    private final Duration programReadModelTtl;
     private final Duration mutexLockTtl;
     private final Duration mutexWaitTimeout;
     private final Duration mutexRetryInterval;
+    private final int searchMaxResultWindow;
 
     /**
      * Creates the program service with persistence, search, Bloom filter, and cache dependencies.
@@ -89,9 +97,11 @@ public class ProgramService {
             ObjectMapper objectMapper,
             @Value("${damai.cache.null-ttl-minutes:5}") long nullTtlMinutes,
             @Value("${damai.cache.program-detail-ttl-hours:2}") long programDetailTtlHours,
+            @Value("${damai.cache.program-read-model-ttl-minutes:5}") long programReadModelTtlMinutes,
             @Value("${damai.cache.mutex-lock-seconds:5}") long mutexLockSeconds,
             @Value("${damai.cache.mutex-wait-millis:500}") long mutexWaitMillis,
-            @Value("${damai.cache.mutex-retry-millis:50}") long mutexRetryMillis
+            @Value("${damai.cache.mutex-retry-millis:50}") long mutexRetryMillis,
+            @Value("${damai.search.max-result-window:10000}") int searchMaxResultWindow
     ) {
         this.programDao = programDao;
         this.programSearchGateway = programSearchGateway;
@@ -101,9 +111,11 @@ public class ProgramService {
         this.objectMapper = objectMapper;
         this.nullTtl = Duration.ofMinutes(nullTtlMinutes);
         this.programDetailTtl = Duration.ofHours(programDetailTtlHours);
+        this.programReadModelTtl = Duration.ofMinutes(programReadModelTtlMinutes);
         this.mutexLockTtl = Duration.ofSeconds(mutexLockSeconds);
         this.mutexWaitTimeout = Duration.ofMillis(mutexWaitMillis);
         this.mutexRetryInterval = Duration.ofMillis(mutexRetryMillis);
+        this.searchMaxResultWindow = searchMaxResultWindow;
     }
 
     /**
@@ -159,6 +171,7 @@ public class ProgramService {
         LOGGER.info("program created, programId={}, title={}", savedProgram.id, savedProgram.title);
         ProgramDetailResponse response = ProgramDetailResponse.of(savedProgram, showTimes, ticketCategories);
         putProgramDetailCache(savedProgram.id, response);
+        deleteHotProgramListCaches();
         programBloomFilter.add(savedProgram.id);
         programChangeEventPublisher.publishUpsert(savedProgram.id, "PROGRAM_CREATED");
         return response;
@@ -171,11 +184,80 @@ public class ProgramService {
     public List<ProgramResponse> listPrograms(String keyword, Long categoryId, Long areaId, int pageNumber, int pageSize) {
         int normalizedPageNumber = Math.max(pageNumber, 1);
         int normalizedPageSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
-        int offset = (normalizedPageNumber - 1) * normalizedPageSize;
+        validateSearchPageWindow(normalizedPageNumber, normalizedPageSize);
         String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim() : null;
-        return programDao.listPrograms(normalizedKeyword, categoryId, areaId, normalizedPageSize, offset)
+        if (normalizedKeyword == null && categoryId == null && areaId == null) {
+            return loadHotProgramsFromReadModel(normalizedPageNumber, normalizedPageSize);
+        }
+        return loadProgramListFromReadModel(normalizedKeyword, categoryId, areaId, normalizedPageNumber, normalizedPageSize, 1);
+    }
+
+    /**
+     * Loads the homepage hot program list from Redis first, then Elasticsearch, and finally MySQL.
+     */
+    private List<ProgramResponse> loadHotProgramsFromReadModel(int pageNumber, int pageSize) {
+        String cacheKey = hotProgramListKey(pageNumber, pageSize);
+        return cacheClient.rebuildWithMutex(
+                hotProgramListLockKey(pageNumber, pageSize),
+                mutexLockTtl,
+                mutexWaitTimeout,
+                mutexRetryInterval,
+                () -> readProgramListCache(cacheKey),
+                () -> {
+                    List<ProgramResponse> programs = loadProgramListFromReadModel(null, null, null, pageNumber, pageSize, 2);
+                    putProgramListCache(cacheKey, programs);
+                    return programs;
+                }
+        );
+    }
+
+    /**
+     * Loads program summaries from the Elasticsearch aggregate read model with a database fallback.
+     */
+    private List<ProgramResponse> loadProgramListFromReadModel(
+            String keyword,
+            Long categoryId,
+            Long areaId,
+            int pageNumber,
+            int pageSize,
+            int sortType
+    ) {
+        ProgramSearchRequest request = new ProgramSearchRequest(
+                keyword,
+                areaId,
+                categoryId,
+                0,
+                null,
+                null,
+                sortType,
+                pageNumber,
+                pageSize
+        );
+        Optional<List<ProgramResponse>> esPrograms = programSearchGateway.searchPrograms(request);
+        if (esPrograms.isPresent()) {
+            LOGGER.info("program list read model hit, count={}", esPrograms.get().size());
+            return esPrograms.get();
+        }
+        LOGGER.warn("program list read model unavailable, fallback to mysql, keyword={}, categoryId={}, areaId={}", keyword, categoryId, areaId);
+        return loadProgramListFromDatabase(keyword, categoryId, areaId, pageNumber, pageSize);
+    }
+
+    /**
+     * Loads program summaries from MySQL and enriches the current page with one batched price-range query.
+     */
+    private List<ProgramResponse> loadProgramListFromDatabase(String keyword, Long categoryId, Long areaId, int pageNumber, int pageSize) {
+        int offset = (pageNumber - 1) * pageSize;
+        List<Program> programs = programDao.listPrograms(keyword, categoryId, areaId, pageSize, offset);
+        if (programs.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, ProgramTicketPriceRange> priceRangeMap = programDao.listTicketPriceRangesByProgramIds(
+                        programs.stream().map(program -> program.id).toList()
+                )
                 .stream()
-                .map(ProgramResponse::from)
+                .collect(Collectors.toMap(range -> range.programId, Function.identity()));
+        return programs.stream()
+                .map(program -> ProgramResponse.from(program, priceRangeMap.get(program.id)))
                 .toList();
     }
 
@@ -196,6 +278,7 @@ public class ProgramService {
     ) {
         int normalizedPageNumber = Math.max(pageNumber, 1);
         int normalizedPageSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        validateSearchPageWindow(normalizedPageNumber, normalizedPageSize);
         ProgramSearchRequest request = new ProgramSearchRequest(
                 StringUtils.hasText(keyword) ? keyword.trim() : null,
                 areaId,
@@ -214,6 +297,16 @@ public class ProgramService {
         }
         LOGGER.warn("program es search unavailable, fallback to mysql list, keyword={}, areaId={}, programCategoryId={}", keyword, areaId, programCategoryId);
         return listPrograms(keyword, programCategoryId, areaId, normalizedPageNumber, normalizedPageSize);
+    }
+
+    /**
+     * Rejects deep result windows that should use a cursor or narrower filters instead.
+     */
+    private void validateSearchPageWindow(int pageNumber, int pageSize) {
+        long resultWindowEnd = ((long) pageNumber - 1) * pageSize + pageSize;
+        if (resultWindowEnd > searchMaxResultWindow) {
+            throw new BusinessException("PROGRAM_DEEP_PAGE_NOT_ALLOWED", "program search page is too deep, use narrower filters", HttpStatus.BAD_REQUEST);
+        }
     }
 
     /**
@@ -246,6 +339,66 @@ public class ProgramService {
                 () -> readProgramDetailCache(programId),
                 () -> loadProgramDetailFromDatabaseAndRefreshCache(programId)
         );
+    }
+
+    /**
+     * Loads and validates database-authoritative program data for order creation.
+     */
+    @Transactional(readOnly = true)
+    public ProgramOrderSnapshotResponse getOrderSnapshot(
+            Long programId,
+            ProgramOrderSnapshotRequest request
+    ) {
+        Program program = programDao.findProgramById(programId)
+                .orElseThrow(() -> new BusinessException(
+                        "PROGRAM_NOT_FOUND",
+                        "program not found",
+                        HttpStatus.NOT_FOUND
+                ));
+        ProgramShowTime showTime = programDao.listShowTimes(programId)
+                .stream()
+                .filter(item -> item.id.equals(request.showTimeId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(
+                        "PROGRAM_SHOW_TIME_INVALID",
+                        "show time does not belong to program",
+                        HttpStatus.BAD_REQUEST
+                ));
+        List<ProgramOrderTicketPriceResponse> ticketPrices = request.ticketCategoryIds()
+                .stream()
+                .distinct()
+                .map(ticketCategoryId -> resolveOrderTicketPrice(programId, ticketCategoryId))
+                .toList();
+        return new ProgramOrderSnapshotResponse(
+                program.id,
+                showTime.id,
+                program.title,
+                program.place,
+                program.itemPicture,
+                showTime.showTime,
+                program.permitChooseSeat,
+                ticketPrices
+        );
+    }
+
+    /**
+     * Loads one ticket category price and verifies that it belongs to the requested program.
+     */
+    private ProgramOrderTicketPriceResponse resolveOrderTicketPrice(Long programId, Long ticketCategoryId) {
+        TicketCategory ticketCategory = programDao.findTicketCategoryById(ticketCategoryId)
+                .orElseThrow(() -> new BusinessException(
+                        "TICKET_CATEGORY_NOT_FOUND",
+                        "ticket category not found",
+                        HttpStatus.NOT_FOUND
+                ));
+        if (!programId.equals(ticketCategory.programId)) {
+            throw new BusinessException(
+                    "TICKET_CATEGORY_PROGRAM_MISMATCH",
+                    "ticket category does not belong to program",
+                    HttpStatus.BAD_REQUEST
+            );
+        }
+        return new ProgramOrderTicketPriceResponse(ticketCategory.id, ticketCategory.price);
     }
 
     /**
@@ -333,6 +486,12 @@ public class ProgramService {
     ) {
         BigDecimal minTicketPrice = priceRange == null ? null : priceRange.minPrice;
         BigDecimal maxTicketPrice = priceRange == null ? null : priceRange.maxPrice;
+        if (minTicketPrice == null) {
+            minTicketPrice = response.program().minTicketPrice();
+        }
+        if (maxTicketPrice == null) {
+            maxTicketPrice = response.program().maxTicketPrice();
+        }
         return ProgramSearchDocument.of(programId, minTicketPrice, maxTicketPrice, response);
     }
 
@@ -478,6 +637,7 @@ public class ProgramService {
         });
         updateSeatStatuses(programId, request.items(), SeatSellStatus.AVAILABLE, SeatSellStatus.LOCKED, "PROGRAM_SEAT_NOT_AVAILABLE");
         cacheClient.delete(programDetailKey(programId));
+        deleteHotProgramListCaches();
         programChangeEventPublisher.publishUpsert(programId, "INVENTORY_LOCKED");
         LOGGER.info("program inventory locked, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
     }
@@ -497,6 +657,7 @@ public class ProgramService {
         });
         updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.AVAILABLE, "PROGRAM_SEAT_RELEASE_FAILED");
         cacheClient.delete(programDetailKey(programId));
+        deleteHotProgramListCaches();
         programChangeEventPublisher.publishUpsert(programId, "INVENTORY_RELEASED");
         LOGGER.info("program inventory released, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
     }
@@ -509,6 +670,7 @@ public class ProgramService {
         findProgramOrThrow(programId);
         updateSeatStatuses(programId, request.items(), SeatSellStatus.LOCKED, SeatSellStatus.SOLD, "PROGRAM_SEAT_SOLD_FAILED");
         cacheClient.delete(programDetailKey(programId));
+        deleteHotProgramListCaches();
         programChangeEventPublisher.publishUpsert(programId, "INVENTORY_SOLD");
         LOGGER.info("program inventory sold, programId={}, orderNumber={}, itemCount={}", programId, request.orderNumber(), request.items().size());
     }
@@ -529,6 +691,7 @@ public class ProgramService {
             throw new BusinessException("TICKET_CATEGORY_UPDATE_FAILED", "ticket category price update failed", HttpStatus.CONFLICT);
         }
         cacheClient.delete(programDetailKey(programId));
+        deleteHotProgramListCaches();
         programChangeEventPublisher.publishUpsert(programId, "TICKET_PRICE_CHANGED");
         TicketCategory updatedTicketCategory = programDao.findTicketCategoryById(ticketCategoryId)
                 .orElseThrow(() -> new BusinessException("TICKET_CATEGORY_NOT_FOUND", "ticket category not found", HttpStatus.NOT_FOUND));
@@ -547,6 +710,7 @@ public class ProgramService {
             throw new BusinessException("PROGRAM_OFFLINE_FAILED", "program offline failed", HttpStatus.CONFLICT);
         }
         cacheClient.delete(programDetailKey(programId));
+        deleteHotProgramListCaches();
         programChangeEventPublisher.publishDelete(programId, "PROGRAM_OFFLINE");
         LOGGER.info("program offline succeeded, programId={}", programId);
     }
@@ -746,6 +910,20 @@ public class ProgramService {
     }
 
     /**
+     * Builds the Redis key for one hot program summary page.
+     */
+    private String hotProgramListKey(int pageNumber, int pageSize) {
+        return DamaiCacheKey.of("program", "hot-list", pageNumber, pageSize);
+    }
+
+    /**
+     * Builds the Redis mutex key for rebuilding one hot program summary page.
+     */
+    private String hotProgramListLockKey(int pageNumber, int pageSize) {
+        return DamaiCacheKey.lock("program", "hot-list", pageNumber, pageSize);
+    }
+
+    /**
      * Serializes and stores one program detail response in Redis.
      */
     private void putProgramDetailCache(Long programId, ProgramDetailResponse response) {
@@ -753,6 +931,17 @@ public class ProgramService {
             cacheClient.put(programDetailKey(programId), objectMapper.writeValueAsString(response), programDetailTtl);
         } catch (JsonProcessingException exception) {
             LOGGER.warn("program detail cache serialization failed, programId={}", programId, exception);
+        }
+    }
+
+    /**
+     * Serializes and stores one hot program summary page in Redis.
+     */
+    private void putProgramListCache(String cacheKey, List<ProgramResponse> programs) {
+        try {
+            cacheClient.put(cacheKey, objectMapper.writeValueAsString(programs), programReadModelTtl);
+        } catch (JsonProcessingException exception) {
+            LOGGER.warn("program hot list cache serialization failed, cacheKey={}", cacheKey, exception);
         }
     }
 
@@ -772,6 +961,25 @@ public class ProgramService {
         Optional<ProgramDetailResponse> cachedDetail = deserializeProgramDetail(value, programId);
         cachedDetail.ifPresent(detail -> LOGGER.info("program detail cache hit, programId={}", programId));
         return cachedDetail;
+    }
+
+    /**
+     * Reads one hot program summary page from Redis.
+     */
+    private Optional<List<ProgramResponse>> readProgramListCache(String cacheKey) {
+        Optional<String> cachedValue = cacheClient.get(cacheKey);
+        if (cachedValue.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            List<ProgramResponse> programs = objectMapper.readValue(cachedValue.get(), PROGRAM_RESPONSE_LIST_TYPE);
+            LOGGER.info("program hot list cache hit, cacheKey={}, count={}", cacheKey, programs.size());
+            return Optional.of(programs);
+        } catch (JsonProcessingException exception) {
+            LOGGER.warn("program hot list cache deserialization failed, cacheKey={}", cacheKey, exception);
+            cacheClient.delete(cacheKey);
+            return Optional.empty();
+        }
     }
 
     /**
@@ -795,6 +1003,15 @@ public class ProgramService {
             cacheClient.delete(programDetailKey(programId));
             return Optional.empty();
         }
+    }
+
+    /**
+     * Deletes the most common hot program summary pages after program data changes.
+     */
+    private void deleteHotProgramListCaches() {
+        cacheClient.delete(hotProgramListKey(1, 10));
+        cacheClient.delete(hotProgramListKey(1, 20));
+        cacheClient.delete(hotProgramListKey(1, MAX_PAGE_SIZE));
     }
 
     /**

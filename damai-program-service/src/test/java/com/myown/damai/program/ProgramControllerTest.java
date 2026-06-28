@@ -24,6 +24,8 @@ import org.springframework.test.web.servlet.MvcResult;
 @AutoConfigureMockMvc
 class ProgramControllerTest {
 
+    private static final String USER_ROLE_HEADER = "X-Damai-User-Role";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -39,6 +41,7 @@ class ProgramControllerTest {
         Long categoryId = createCategory(parentCategoryId, "Pop", 2);
 
         MvcResult programResult = mockMvc.perform(post("/api/programs")
+                        .header(USER_ROLE_HEADER, "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -81,6 +84,7 @@ class ProgramControllerTest {
 
         JsonNode programJson = objectMapper.readTree(programResult.getResponse().getContentAsString());
         Long programId = programJson.path("data").path("program").path("id").asLong();
+        Long showTimeId = programJson.path("data").path("showTimes").get(0).path("id").asLong();
         Long ticketCategoryId = programJson.path("data").path("ticketCategories").get(0).path("id").asLong();
 
         mockMvc.perform(get("/api/programs")
@@ -89,7 +93,9 @@ class ProgramControllerTest {
                         .param("areaId", "110000"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].id").value(programId));
+                .andExpect(jsonPath("$.data[0].id").value(programId))
+                .andExpect(jsonPath("$.data[0].minTicketPrice").value(680))
+                .andExpect(jsonPath("$.data[0].maxTicketPrice").value(680));
 
         mockMvc.perform(get("/api/programs/search")
                         .param("keyword", "Demo")
@@ -99,16 +105,44 @@ class ProgramControllerTest {
                         .param("type", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
-                .andExpect(jsonPath("$.data[0].id").value(programId));
+                .andExpect(jsonPath("$.data[0].id").value(programId))
+                .andExpect(jsonPath("$.data[0].minTicketPrice").value(680))
+                .andExpect(jsonPath("$.data[0].maxTicketPrice").value(680));
+
+        mockMvc.perform(get("/api/programs/search")
+                        .param("keyword", "Demo")
+                        .param("pageNumber", "101")
+                        .param("pageSize", "100"))
+                .andExpect(status().isBadRequest());
 
         mockMvc.perform(get("/api/programs/{programId}", programId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.program.id").value(programId))
+                .andExpect(jsonPath("$.data.program.minTicketPrice").value(680))
+                .andExpect(jsonPath("$.data.program.maxTicketPrice").value(680))
                 .andExpect(jsonPath("$.data.detail").value("A database-backed program detail."))
                 .andExpect(jsonPath("$.data.notices.entryRule").value("Enter with valid ticket and ID."))
                 .andExpect(jsonPath("$.data.ticketCategories[0].remainNumber").value(20));
 
+        mockMvc.perform(post("/api/programs/{programId}/order-snapshot", programId)
+                        .header(USER_ROLE_HEADER, "SYSTEM")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "showTimeId": %d,
+                                  "ticketCategoryIds": [%d]
+                                }
+                                """.formatted(showTimeId, ticketCategoryId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.programId").value(programId))
+                .andExpect(jsonPath("$.data.showTimeId").value(showTimeId))
+                .andExpect(jsonPath("$.data.title").value("Demo Concert"))
+                .andExpect(jsonPath("$.data.place").value("Demo Arena"))
+                .andExpect(jsonPath("$.data.showTime").value("2026-08-01T12:00:00Z"))
+                .andExpect(jsonPath("$.data.ticketPrices[0].price").value(680));
+
         mockMvc.perform(post("/api/programs/{programId}/ticket-categories/{ticketCategoryId}/price", programId, ticketCategoryId)
+                        .header(USER_ROLE_HEADER, "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -120,9 +154,12 @@ class ProgramControllerTest {
 
         mockMvc.perform(get("/api/programs/{programId}", programId))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.program.minTicketPrice").value(720))
+                .andExpect(jsonPath("$.data.program.maxTicketPrice").value(720))
                 .andExpect(jsonPath("$.data.ticketCategories[0].price").value(720));
 
         mockMvc.perform(post("/api/programs/{programId}/seats", programId)
+                        .header(USER_ROLE_HEADER, "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -175,6 +212,9 @@ class ProgramControllerTest {
                 .andExpect(jsonPath("$.data[1].sellStatus").value(3));
 
         mockMvc.perform(post("/api/programs/{programId}/offline", programId))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/programs/{programId}/offline", programId)
+                        .header(USER_ROLE_HEADER, "OPERATOR"))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/programs/{programId}", programId))
                 .andExpect(status().isNotFound());
@@ -185,6 +225,7 @@ class ProgramControllerTest {
      */
     private Long createCategory(Long parentId, String name, Integer type) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/programs/categories")
+                        .header(USER_ROLE_HEADER, "OPERATOR")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -232,6 +273,7 @@ class ProgramControllerTest {
             String action
     ) throws Exception {
         mockMvc.perform(post("/api/programs/{programId}/inventory/{action}", programId, action)
+                        .header(USER_ROLE_HEADER, "SYSTEM")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {

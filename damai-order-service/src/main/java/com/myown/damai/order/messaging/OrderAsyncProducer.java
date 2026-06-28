@@ -56,8 +56,9 @@ public class OrderAsyncProducer {
     public void sendCreateOrderMessage(OrderAsyncCreateMessage message) {
         try {
             String payload = objectMapper.writeValueAsString(message);
-            sendPayload(createTopic, message.messageKey(), payload);
-            LOGGER.info("order async create message sent, topic={}, messageKey={}, orderNumber={}", createTopic, message.messageKey(), message.orderNumber());
+            String kafkaKey = programPartitionKey(message);
+            sendPayload(createTopic, kafkaKey, message.messageKey(), payload);
+            LOGGER.info("order async create message sent, topic={}, kafkaKey={}, messageKey={}, orderNumber={}", createTopic, kafkaKey, message.messageKey(), message.orderNumber());
         } catch (JsonProcessingException exception) {
             throw new BusinessException("ORDER_ASYNC_MESSAGE_INVALID", "order async message serialization failed", HttpStatus.INTERNAL_SERVER_ERROR);
         }
@@ -67,34 +68,55 @@ public class OrderAsyncProducer {
      * Sends one failed order creation message to the retry topic.
      */
     public void sendRetryOrderMessage(String messageKey, String payload) {
-        sendPayload(retryTopic, messageKey, payload);
-        LOGGER.info("order async retry message sent, topic={}, messageKey={}", retryTopic, messageKey);
+        String kafkaKey = programPartitionKey(payload, messageKey);
+        sendPayload(retryTopic, kafkaKey, messageKey, payload);
+        LOGGER.info("order async retry message sent, topic={}, kafkaKey={}, messageKey={}", retryTopic, kafkaKey, messageKey);
     }
 
     /**
      * Sends one exhausted or invalid order creation message to the dead-letter topic.
      */
     public void sendDeadLetterMessage(String messageKey, String payload) {
-        sendPayload(deadTopic, messageKey, payload);
-        LOGGER.info("order async dead-letter message sent, topic={}, messageKey={}", deadTopic, messageKey);
+        String kafkaKey = programPartitionKey(payload, messageKey);
+        sendPayload(deadTopic, kafkaKey, messageKey, payload);
+        LOGGER.info("order async dead-letter message sent, topic={}, kafkaKey={}, messageKey={}", deadTopic, kafkaKey, messageKey);
     }
 
     /**
      * Sends one serialized payload to Kafka and waits for broker acknowledgement.
      */
-    private void sendPayload(String topic, String messageKey, String payload) {
+    private void sendPayload(String topic, String kafkaKey, String messageKey, String payload) {
         try {
-            kafkaTemplate.send(topic, messageKey, payload).get(sendTimeoutSeconds, TimeUnit.SECONDS);
+            kafkaTemplate.send(topic, kafkaKey, payload).get(sendTimeoutSeconds, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("order async message send interrupted, topic={}, messageKey={}", topic, messageKey, exception);
+            LOGGER.warn("order async message send interrupted, topic={}, kafkaKey={}, messageKey={}", topic, kafkaKey, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_INTERRUPTED", "order async message send interrupted", HttpStatus.SERVICE_UNAVAILABLE);
         } catch (ExecutionException | TimeoutException exception) {
-            LOGGER.warn("order async message send failed, topic={}, messageKey={}", topic, messageKey, exception);
+            LOGGER.warn("order async message send failed, topic={}, kafkaKey={}, messageKey={}", topic, kafkaKey, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_FAILED", "order async message send failed", HttpStatus.SERVICE_UNAVAILABLE);
         } catch (RuntimeException exception) {
-            LOGGER.warn("order async message send failed, topic={}, messageKey={}", topic, messageKey, exception);
+            LOGGER.warn("order async message send failed, topic={}, kafkaKey={}, messageKey={}", topic, kafkaKey, messageKey, exception);
             throw new BusinessException("ORDER_ASYNC_SEND_FAILED", "order async message send failed", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    /**
+     * Builds the Kafka partition key so one program is processed in partition order.
+     */
+    private String programPartitionKey(OrderAsyncCreateMessage message) {
+        return "program:" + message.request().programId();
+    }
+
+    /**
+     * Resolves the Kafka partition key from payload and falls back to the message key for invalid payloads.
+     */
+    private String programPartitionKey(String payload, String fallbackKey) {
+        try {
+            OrderAsyncCreateMessage message = objectMapper.readValue(payload, OrderAsyncCreateMessage.class);
+            return programPartitionKey(message);
+        } catch (JsonProcessingException exception) {
+            return fallbackKey;
         }
     }
 }

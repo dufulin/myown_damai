@@ -1,5 +1,6 @@
 package com.myown.damai.pay.controller;
 
+import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.pay.dto.PagePayRequest;
@@ -77,7 +78,10 @@ public class PayController {
      * Manually compensates due payment events.
      */
     @PostMapping("/events/compensate")
-    public ApiResponse<PayEventCompensateResponse> compensatePayEvents() {
+    public ApiResponse<PayEventCompensateResponse> compensatePayEvents(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader
+    ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("pay event compensate request received");
         int processedCount = payOrderEventService.compensateDueEvents();
         LOGGER.info("pay event compensate request succeeded, processedCount={}", processedCount);
@@ -88,7 +92,11 @@ public class PayController {
      * Manually retries one payment event by event key.
      */
     @PostMapping("/events/{eventKey}/retry")
-    public ApiResponse<PayEventCompensateResponse> retryPayEvent(@PathVariable String eventKey) {
+    public ApiResponse<PayEventCompensateResponse> retryPayEvent(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
+            @PathVariable String eventKey
+    ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("pay event retry request received, eventKey={}", eventKey);
         int processedCount = payOrderEventService.manualRetry(eventKey);
         LOGGER.info("pay event retry request succeeded, eventKey={}, processedCount={}", eventKey, processedCount);
@@ -99,7 +107,11 @@ public class PayController {
      * Gets one payment event status by event key.
      */
     @GetMapping("/events/{eventKey}")
-    public ApiResponse<PayOrderEventResponse> getPayEvent(@PathVariable String eventKey) {
+    public ApiResponse<PayOrderEventResponse> getPayEvent(
+            @RequestHeader(value = AuthenticatedUserHeader.USER_ROLE, required = false) String roleHeader,
+            @PathVariable String eventKey
+    ) {
+        AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("pay event detail request received, eventKey={}", eventKey);
         PayOrderEventResponse response = payOrderEventService.getEvent(eventKey);
         LOGGER.info("pay event detail request succeeded, eventKey={}, status={}", eventKey, response.eventStatusName());

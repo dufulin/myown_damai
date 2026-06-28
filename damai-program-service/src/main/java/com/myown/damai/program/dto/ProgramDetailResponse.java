@@ -1,6 +1,8 @@
 package com.myown.damai.program.dto;
 
 import com.myown.damai.program.entity.Program;
+import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -22,8 +24,16 @@ public record ProgramDetailResponse(
             List<ProgramShowTimeResponse> showTimes,
             List<TicketCategoryResponse> ticketCategories
     ) {
+        BigDecimal minTicketPrice = ticketCategories.stream()
+                .map(TicketCategoryResponse::price)
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+        BigDecimal maxTicketPrice = ticketCategories.stream()
+                .map(TicketCategoryResponse::price)
+                .max(Comparator.naturalOrder())
+                .orElse(null);
         return new ProgramDetailResponse(
-                ProgramResponse.from(program),
+                ProgramResponse.from(program, minTicketPrice, maxTicketPrice),
                 program.detail,
                 ProgramNoticeResponse.from(program),
                 showTimes,

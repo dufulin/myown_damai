@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.user.mapper.UserRefreshTokenMapper">
+
+    <resultMap id="UserRefreshTokenResultMap" type="com.myown.damai.user.entity.UserRefreshToken">
+        <id property="id" column="refresh_token_id"/>
+        <result property="tokenHash" column="token_hash"/>
+        <result property="createdAt" column="refresh_created_at"/>
+        <result property="expiresAt" column="expires_at"/>
+        <result property="revokedAt" column="revoked_at"/>
+        <association property="user" javaType="com.myown.damai.user.entity.UserAccount">
+            <id property="id" column="user_id"/>
+            <result property="name" column="name"/>
+            <result property="relName" column="rel_name"/>
+            <result property="mobile" column="mobile"/>
+            <result property="gender" column="gender"/>
+            <result property="passwordHash" column="password"/>
+            <result property="emailStatus" column="email_status"/>
+            <result property="email" column="email"/>
+            <result property="relAuthenticationStatus" column="rel_authentication_status"/>
+            <result property="idNumber" column="id_number"/>
+            <result property="address" column="address"/>
+            <result property="status" column="status_name"/>
+            <result property="role" column="role_name"/>
+            <result property="createdAt" column="user_create_time"/>
+            <result property="updatedAt" column="user_edit_time"/>
+        </association>
+    </resultMap>
+
+    <select id="selectByTokenHash" resultMap="UserRefreshTokenResultMap">
+        SELECT
+            r.id AS refresh_token_id,
+            r.token_hash,
+            r.created_at AS refresh_created_at,
+            r.expires_at,
+            r.revoked_at,
+            u.id AS user_id,
+            u.name,
+            u.rel_name,
+            u.mobile,
+            u.gender,
+            u.password,
+            u.email_status,
+            u.email,
+            u.rel_authentication_status,
+            u.id_number,
+            u.address,
+            CASE u.status WHEN 1 THEN 'ACTIVE' ELSE 'DISABLED' END AS status_name,
+            COALESCE(ur.role, 'USER') AS role_name,
+            u.create_time AS user_create_time,
+            u.edit_time AS user_edit_time
+        FROM d_user_refresh_tokens r
+        JOIN d_user u ON u.id = r.user_id
+        LEFT JOIN d_user_role ur ON ur.user_id = u.id
+        WHERE r.token_hash = #{tokenHash}
+    </select>
+
+    <insert id="insert" parameterType="com.myown.damai.user.entity.UserRefreshToken"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO d_user_refresh_tokens
+            (token_hash, user_id, created_at, expires_at, revoked_at)
+        VALUES
+            (#{tokenHash}, #{user.id}, #{createdAt}, #{expiresAt}, #{revokedAt})
+    </insert>
+
+    <update id="update" parameterType="com.myown.damai.user.entity.UserRefreshToken">
+        UPDATE d_user_refresh_tokens
+        SET expires_at = #{expiresAt},
+            revoked_at = #{revokedAt}
+        WHERE id = #{id}
+    </update>
+
+    <update id="revokeIfActive">
+        UPDATE d_user_refresh_tokens
+        SET revoked_at = #{revokedAt}
+        WHERE id = #{id}
+          AND revoked_at IS NULL
+          AND expires_at &gt; #{revokedAt}
+    </update>
+
+    <delete id="deleteInactiveBefore">
+        DELETE FROM d_user_refresh_tokens
+        WHERE expires_at &lt; #{deleteBefore}
+           OR (revoked_at IS NOT NULL AND revoked_at &lt; #{deleteBefore})
+    </delete>
+</mapper>
