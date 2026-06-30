@@ -15,6 +15,7 @@ import com.myown.damai.program.dto.TicketCategoryPriceUpdateRequest;
 import com.myown.damai.program.dto.TicketCategoryResponse;
 import com.myown.damai.program.service.ProgramService;
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -83,6 +84,7 @@ public class ProgramController {
         AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.OPERATOR, UserRole.ADMIN);
         LOGGER.info("program create request received, title={}", request.title());
         ProgramDetailResponse response = programService.createProgram(request);
+        TraceContext.putProgramId(response.program().id());
         LOGGER.info("program create request succeeded, programId={}", response.program().id());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
@@ -251,6 +253,8 @@ public class ProgramController {
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
         AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
+        TraceContext.putProgramId(programId);
+        TraceContext.putOrderNumber(request.orderNumber());
         LOGGER.info("program inventory lock request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.lockInventory(programId, request);
         LOGGER.info("program inventory lock request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
@@ -267,6 +271,8 @@ public class ProgramController {
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
         AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
+        TraceContext.putProgramId(programId);
+        TraceContext.putOrderNumber(request.orderNumber());
         LOGGER.info("program inventory release request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.releaseInventory(programId, request);
         LOGGER.info("program inventory release request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());
@@ -283,6 +289,8 @@ public class ProgramController {
             @Valid @RequestBody ProgramInventoryRequest request
     ) {
         AuthenticatedUserHeader.requireAnyRole(roleHeader, UserRole.SYSTEM);
+        TraceContext.putProgramId(programId);
+        TraceContext.putOrderNumber(request.orderNumber());
         LOGGER.info("program inventory sold request received, programId={}, orderNumber={}", programId, request.orderNumber());
         programService.markInventorySold(programId, request);
         LOGGER.info("program inventory sold request succeeded, programId={}, orderNumber={}", programId, request.orderNumber());

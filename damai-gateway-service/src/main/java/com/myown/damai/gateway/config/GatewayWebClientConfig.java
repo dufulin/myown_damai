@@ -1,5 +1,6 @@
 package com.myown.damai.gateway.config;
 
+import com.myown.damai.common.observability.TraceContext;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.ClientRequest;
 import reactor.netty.http.client.HttpClient;
 
 /**
@@ -36,6 +38,13 @@ public class GatewayWebClientConfig {
                 .doOnConnected(connection -> connection
                         .addHandlerLast(new ReadTimeoutHandler(readTimeoutMillis, TimeUnit.MILLISECONDS))
                         .addHandlerLast(new WriteTimeoutHandler(writeTimeoutMillis, TimeUnit.MILLISECONDS)));
-        return WebClient.builder().clientConnector(new ReactorClientHttpConnector(httpClient));
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .filter((request, next) -> {
+                    ClientRequest tracedRequest = ClientRequest.from(request)
+                            .headers(TraceContext::writeTo)
+                            .build();
+                    return next.exchange(tracedRequest);
+                });
     }
 }

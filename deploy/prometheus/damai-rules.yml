@@ -1,0 +1,31 @@
+groups:
+  - name: damai-observability
+    interval: 30s
+    rules:
+      - record: damai:http_qps:rate5m
+        expr: sum by (application, method, uri) (rate(http_server_requests_seconds_count[5m]))
+
+      - record: damai:http_error_ratio:rate5m
+        expr: |
+          sum by (application) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          /
+          clamp_min(sum by (application) (rate(http_server_requests_seconds_count[5m])), 0.001)
+
+      - record: damai:kafka_consumer_lag:max
+        expr: max by (application, client_id) (kafka_consumer_records_lag_max)
+
+      - record: damai:redis_cache_hit_ratio:rate5m
+        expr: |
+          sum by (application) (rate(damai_cache_requests_total{result="hit"}[5m]))
+          /
+          clamp_min(
+            sum by (application) (rate(damai_cache_requests_total{result=~"hit|miss"}[5m])),
+            0.001
+          )
+
+      - record: damai:order_creation_duration:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, application, mode) (rate(damai_order_creation_duration_seconds_bucket[5m]))
+          )

@@ -6,6 +6,7 @@ import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWeb
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import com.myown.damai.common.observability.TraceContext;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
@@ -38,8 +39,24 @@ class GatewayFilterTest {
                 .header("X-Forwarded-For", "10.0.0.20")
                 .exchange()
                 .expectStatus().isUnauthorized()
+                .expectHeader().exists(TraceContext.TRACE_ID_HEADER)
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("UNAUTHORIZED");
+    }
+
+    /**
+     * Verifies a valid caller trace id is returned unchanged for cross-system correlation.
+     */
+    @Test
+    void validTraceIdIsPropagatedToResponse() {
+        String traceId = "frontend-trace-12345678";
+        webTestClient.get()
+                .uri("/api/programs")
+                .header("X-Forwarded-For", "10.0.0.21")
+                .header(TraceContext.TRACE_ID_HEADER, traceId)
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectHeader().valueEquals(TraceContext.TRACE_ID_HEADER, traceId);
     }
 
     /**

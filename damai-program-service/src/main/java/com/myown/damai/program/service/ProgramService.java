@@ -234,11 +234,16 @@ public class ProgramService {
                 pageSize
         );
         Optional<List<ProgramResponse>> esPrograms = programSearchGateway.searchPrograms(request);
-        if (esPrograms.isPresent()) {
+        if (esPrograms.isPresent() && !esPrograms.get().isEmpty()) {
             LOGGER.info("program list read model hit, count={}", esPrograms.get().size());
             return esPrograms.get();
         }
-        LOGGER.warn("program list read model unavailable, fallback to mysql, keyword={}, categoryId={}, areaId={}", keyword, categoryId, areaId);
+        LOGGER.warn(
+                "program list read model unavailable or empty, fallback to mysql, keyword={}, categoryId={}, areaId={}",
+                keyword,
+                categoryId,
+                areaId
+        );
         return loadProgramListFromDatabase(keyword, categoryId, areaId, pageNumber, pageSize);
     }
 
@@ -291,11 +296,16 @@ public class ProgramService {
                 normalizedPageSize
         );
         Optional<List<ProgramResponse>> esPrograms = programSearchGateway.searchPrograms(request);
-        if (esPrograms.isPresent()) {
+        if (esPrograms.isPresent() && !esPrograms.get().isEmpty()) {
             LOGGER.info("program es search succeeded, count={}", esPrograms.get().size());
             return esPrograms.get();
         }
-        LOGGER.warn("program es search unavailable, fallback to mysql list, keyword={}, areaId={}, programCategoryId={}", keyword, areaId, programCategoryId);
+        LOGGER.warn(
+                "program es search unavailable or empty, fallback to mysql list, keyword={}, areaId={}, programCategoryId={}",
+                keyword,
+                areaId,
+                programCategoryId
+        );
         return listPrograms(keyword, programCategoryId, areaId, normalizedPageNumber, normalizedPageSize);
     }
 
@@ -408,9 +418,9 @@ public class ProgramService {
     public void syncProgramDetailsToSearchIndex() {
         List<Long> programIds = programDao.listNormalProgramIds();
         programBloomFilter.rebuild(programIds);
-        boolean createdIndex = programSearchGateway.createProgramDetailIndexIfAbsent();
-        if (!createdIndex) {
-            LOGGER.info("program detail es startup sync skipped because index already exists or search is unavailable");
+        boolean indexReady = programSearchGateway.createProgramDetailIndexIfAbsent();
+        if (!indexReady) {
+            LOGGER.info("program detail es startup sync skipped because search is unavailable");
             return;
         }
         Map<Long, ProgramTicketPriceRange> priceRangeMap = programDao.listTicketPriceRanges()
@@ -422,6 +432,7 @@ public class ProgramService {
             programSearchGateway.saveProgramDetail(buildSearchDocument(programId, response, priceRangeMap.get(programId)));
             successCount++;
         }
+        deleteHotProgramListCaches();
         LOGGER.info("program detail es startup sync finished, count={}", successCount);
     }
 
@@ -973,6 +984,12 @@ public class ProgramService {
         }
         try {
             List<ProgramResponse> programs = objectMapper.readValue(cachedValue.get(), PROGRAM_RESPONSE_LIST_TYPE);
+            if (programs.isEmpty()) {
+                // An empty homepage cache may have been produced by a stale ES index; rebuild it from MySQL.
+                LOGGER.info("program hot list empty cache invalidated, cacheKey={}", cacheKey);
+                cacheClient.delete(cacheKey);
+                return Optional.empty();
+            }
             LOGGER.info("program hot list cache hit, cacheKey={}, count={}", cacheKey, programs.size());
             return Optional.of(programs);
         } catch (JsonProcessingException exception) {

@@ -43,6 +43,25 @@ class GatewayRolePolicyTest {
     }
 
     /**
+     * Verifies management reads allow operators while management role updates require administrators.
+     */
+    @Test
+    void managementRoutesUseOperationAndAdministratorBoundaries() {
+        GatewayRolePolicy.Requirement dashboardRequirement = rolePolicy
+                .resolve(HttpMethod.GET, "/api/admin/dashboard")
+                .orElseThrow();
+        assertTrue(dashboardRequirement.allows(UserRole.OPERATOR));
+        assertTrue(dashboardRequirement.allows(UserRole.ADMIN));
+        assertFalse(dashboardRequirement.allows(UserRole.USER));
+
+        GatewayRolePolicy.Requirement roleRequirement = rolePolicy
+                .resolve(HttpMethod.PUT, "/api/admin/users/12/role")
+                .orElseThrow();
+        assertFalse(roleRequirement.allows(UserRole.OPERATOR));
+        assertTrue(roleRequirement.allows(UserRole.ADMIN));
+    }
+
+    /**
      * Verifies service callbacks cannot be invoked through the public gateway.
      */
     @Test

@@ -1,0 +1,23 @@
+spring:
+  config:
+    import:
+      - optional:nacos:${spring.application.name}-${spring.profiles.active}.yml?refreshEnabled=true
+      - optional:nacos:${spring.application.name}.yml?refreshEnabled=true
+  cloud:
+    nacos:
+      config:
+        enabled: ${DAMAI_NACOS_CONFIG_ENABLED:true}
+        import-check:
+          enabled: true
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:nacos-server:8848}
+      discovery:
+        enabled: ${DAMAI_NACOS_DISCOVERY_ENABLED:true}
+        register-enabled: ${DAMAI_NACOS_REGISTER_ENABLED:true}
+        server-addr: ${DAMAI_NACOS_SERVER_ADDR:nacos-server:8848}
+
+damai:
+  admin:
+    user-service-url: ${DAMAI_USER_SERVICE_URL:http://damai-user-service:8081}
+    program-service-url: ${DAMAI_PROGRAM_SERVICE_URL:http://damai-program-service:8082}
+    order-service-url: ${DAMAI_ORDER_SERVICE_URL:http://damai-order-service:8083}
+    pay-service-url: ${DAMAI_PAY_SERVICE_URL:http://damai-pay-service:8084}

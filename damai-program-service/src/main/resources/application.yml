@@ -2,6 +2,8 @@ server:
   port: 8082
 
 spring:
+  config:
+    import: optional:classpath:damai-observability.yml
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
@@ -17,11 +19,15 @@ spring:
         enabled: false
       host: ${DAMAI_REDIS_HOST:localhost}
       port: ${DAMAI_REDIS_PORT:6379}
-      password: ${DAMAI_REDIS_PASSWORD:}
+      password: ${DAMAI_REDIS_PASSWORD:123}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: 2s
   kafka:
     bootstrap-servers: ${DAMAI_KAFKA_BOOTSTRAP_SERVERS:${DAMAI_KAFKA_HOST:localhost}:${DAMAI_KAFKA_PORT:9092}}
+    listener:
+      observation-enabled: true
+    template:
+      observation-enabled: true
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -54,7 +60,7 @@ spring:
         group: ${DAMAI_NACOS_GROUP:DEFAULT_GROUP}
   sql:
     init:
-      mode: always
+      mode: ${DAMAI_PROGRAM_SQL_INIT_MODE:never}
       schema-locations: classpath:schema.sql
 
 mybatis:

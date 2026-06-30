@@ -4,6 +4,7 @@ import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
+import com.myown.damai.common.observability.TraceContext;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,10 @@ public class ProgramInventoryClient {
         this.restClient = restClientBuilder
                 .requestFactory(requestFactory)
                 .baseUrl(programServiceBaseUrl)
+                .requestInterceptor((request, body, execution) -> {
+                    TraceContext.writeTo(request.getHeaders());
+                    return execution.execute(request, body);
+                })
                 .build();
         this.inventoryCircuitBreaker = circuitBreakerFactory.create("orderProgramInventoryClient");
         this.maxRetryCount = maxRetryCount;

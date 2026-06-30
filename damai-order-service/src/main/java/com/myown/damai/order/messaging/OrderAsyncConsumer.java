@@ -2,6 +2,7 @@ package com.myown.damai.order.messaging;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.order.dao.OrderAsyncMessageDao;
 import com.myown.damai.order.dto.OrderAsyncCreateMessage;
 import com.myown.damai.order.entity.OrderAsyncMessage;
@@ -67,28 +68,49 @@ public class OrderAsyncConsumer {
     ) {
         try {
             OrderAsyncCreateMessage message = objectMapper.readValue(payload, OrderAsyncCreateMessage.class);
-            ensureMessageTracked(message, payload, topic);
-            if (!claimMessage(message)) {
-                return;
-            }
-            LOGGER.info(
-                    "order async create message received, topic={}, kafkaKey={}, partition={}, offset={}, messageKey={}, orderNumber={}, programId={}",
-                    topic,
-                    kafkaKey,
-                    partition,
-                    offset,
-                    message.messageKey(),
+            try (TraceContext.Scope ignored = TraceContext.open(
+                    message.traceId(),
+                    message.request().userId(),
                     message.orderNumber(),
                     message.request().programId()
-            );
-            orderService.createOrderFromAsyncMessage(message);
-            orderAsyncMessageDao.markSucceeded(message.messageKey());
-            LOGGER.info("order async create message handled, messageKey={}, orderNumber={}", message.messageKey(), message.orderNumber());
+            )) {
+                processMessage(message, payload, topic, kafkaKey, partition, offset);
+            }
         } catch (JsonProcessingException exception) {
             handleInvalidPayload(payload, kafkaKey, exception);
         } catch (RuntimeException exception) {
             handleMessageFailure(payload, exception);
         }
+    }
+
+    /**
+     * Processes one decoded order message inside its restored trace context.
+     */
+    private void processMessage(
+            OrderAsyncCreateMessage message,
+            String payload,
+            String topic,
+            String kafkaKey,
+            Integer partition,
+            Long offset
+    ) {
+        ensureMessageTracked(message, payload, topic);
+        if (!claimMessage(message)) {
+            return;
+        }
+        LOGGER.info(
+                "order async create message received, topic={}, kafkaKey={}, partition={}, offset={}, messageKey={}, orderNumber={}, programId={}",
+                topic,
+                kafkaKey,
+                partition,
+                offset,
+                message.messageKey(),
+                message.orderNumber(),
+                message.request().programId()
+        );
+        orderService.createOrderFromAsyncMessage(message);
+        orderAsyncMessageDao.markSucceeded(message.messageKey());
+        LOGGER.info("order async create message handled, messageKey={}, orderNumber={}", message.messageKey(), message.orderNumber());
     }
 
     /**
@@ -147,19 +169,26 @@ public class OrderAsyncConsumer {
     private void handleMessageFailure(String payload, RuntimeException exception) {
         try {
             OrderAsyncCreateMessage message = objectMapper.readValue(payload, OrderAsyncCreateMessage.class);
-            OrderAsyncMessage asyncMessage = orderAsyncMessageDao.findByMessageKey(message.messageKey())
-                    .orElseThrow(() -> exception);
-            int nextRetryCount = asyncMessage.retryCount + 1;
-            if (nextRetryCount >= asyncMessage.maxRetryCount) {
-                orderAsyncMessageDao.markDead(message.messageKey(), nextRetryCount, exception.getMessage());
-                orderService.clearAsyncPendingOrder(message);
-                orderAsyncProducer.sendDeadLetterMessage(message.messageKey(), payload);
-                LOGGER.warn("order async create message moved to dead letter, messageKey={}, retryCount={}", message.messageKey(), nextRetryCount, exception);
-                return;
+            try (TraceContext.Scope ignored = TraceContext.open(
+                    message.traceId(),
+                    message.request().userId(),
+                    message.orderNumber(),
+                    message.request().programId()
+            )) {
+                OrderAsyncMessage asyncMessage = orderAsyncMessageDao.findByMessageKey(message.messageKey())
+                        .orElseThrow(() -> exception);
+                int nextRetryCount = asyncMessage.retryCount + 1;
+                if (nextRetryCount >= asyncMessage.maxRetryCount) {
+                    orderAsyncMessageDao.markDead(message.messageKey(), nextRetryCount, exception.getMessage());
+                    orderService.clearAsyncPendingOrder(message);
+                    orderAsyncProducer.sendDeadLetterMessage(message.messageKey(), payload);
+                    LOGGER.warn("order async create message moved to dead letter, messageKey={}, retryCount={}", message.messageKey(), nextRetryCount, exception);
+                    return;
+                }
+                orderAsyncMessageDao.markRetrying(message.messageKey(), nextRetryCount, exception.getMessage());
+                orderAsyncProducer.sendRetryOrderMessage(message.messageKey(), payload);
+                LOGGER.warn("order async create message scheduled for retry, messageKey={}, retryCount={}", message.messageKey(), nextRetryCount, exception);
             }
-            orderAsyncMessageDao.markRetrying(message.messageKey(), nextRetryCount, exception.getMessage());
-            orderAsyncProducer.sendRetryOrderMessage(message.messageKey(), payload);
-            LOGGER.warn("order async create message scheduled for retry, messageKey={}, retryCount={}", message.messageKey(), nextRetryCount, exception);
         } catch (JsonProcessingException parseException) {
             handleInvalidPayload(payload, null, parseException);
         }

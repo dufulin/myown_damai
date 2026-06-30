@@ -1,5 +1,23 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import {
+  ArrowLeft,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  House,
+  LayoutDashboard,
+  LogOut,
+  Power,
+  ReceiptText,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  TimerReset,
+  UserRound,
+  UserRoundCog
+} from '@lucide/vue'
 
 const apiBase = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8080`
 const token = ref('')
@@ -12,12 +30,19 @@ const homeProgramLoading = ref(false)
 const detailLoading = ref(false)
 const orderLoading = ref(false)
 const orderListLoading = ref(false)
+const adminLoading = ref(false)
+const adminActionLoading = ref('')
 const programCategories = ref([])
 const homePrograms = ref([])
 const programs = ref([])
 const orders = ref([])
 const ticketUsers = ref([])
 const selectedProgramDetail = ref(null)
+const adminDashboard = ref(null)
+const adminUsers = ref([])
+const adminPrograms = ref([])
+const adminOrders = ref([])
+const adminTab = ref('overview')
 const viewMode = ref('home')
 const searchKeyword = ref('')
 const pageNumber = ref(1)
@@ -25,6 +50,7 @@ const orderPageNumber = ref(1)
 const pageSize = 6
 const orderPageSize = 8
 const homePageSize = 10
+const adminPageSize = 12
 const programSheetOpen = ref(false)
 const notice = reactive({ type: 'info', text: `Backend API: ${apiBase}` })
 const activeFilter = reactive({
@@ -33,6 +59,31 @@ const activeFilter = reactive({
   areaId: null,
   keyword: ''
 })
+
+const adminPages = reactive({
+  users: 1,
+  programs: 1,
+  orders: 1
+})
+
+const adminTotals = reactive({
+  users: 0,
+  programs: 0,
+  orders: 0
+})
+
+const adminFilters = reactive({
+  userKeyword: '',
+  userRole: '',
+  programKeyword: '',
+  programStatus: '',
+  orderNumber: '',
+  orderUserId: '',
+  orderProgramId: '',
+  orderStatus: ''
+})
+
+const adminRoleDrafts = reactive({})
 
 const searchFilters = reactive({
   areaId: '',
@@ -98,9 +149,29 @@ const sortOptions = [
 ]
 
 const isLoggedIn = computed(() => Boolean(token.value && currentUser.value))
+const canAccessAdmin = computed(() => ['OPERATOR', 'ADMIN'].includes(currentUser.value?.role))
+const isAdministrator = computed(() => currentUser.value?.role === 'ADMIN')
+const pageTitle = computed(() => {
+  if (!isLoggedIn.value) {
+    return 'Damai Ticket Management'
+  }
+  if (viewMode.value === 'admin') {
+    return '运营管理控制台'
+  }
+  if (viewMode.value === 'profile') {
+    return '个人中心'
+  }
+  if (viewMode.value === 'detail') {
+    return '节目详情'
+  }
+  return 'Program Home'
+})
 const title = computed(() => (mode.value === 'login' ? 'Login' : 'Register'))
 const hasNextPage = computed(() => programs.value.length === pageSize)
 const hasNextOrderPage = computed(() => orders.value.length === orderPageSize)
+const hasNextAdminUserPage = computed(() => adminPages.users * adminPageSize < adminTotals.users)
+const hasNextAdminProgramPage = computed(() => adminPages.programs * adminPageSize < adminTotals.programs)
+const hasNextAdminOrderPage = computed(() => adminPages.orders * adminPageSize < adminTotals.orders)
 const selectedProgram = computed(() => selectedProgramDetail.value?.program || null)
 const showTimes = computed(() => selectedProgramDetail.value?.showTimes || [])
 const ticketCategories = computed(() => selectedProgramDetail.value?.ticketCategories || [])
@@ -233,10 +304,12 @@ function formatDateTime(value) {
  */
 function orderStatusText(status) {
   const statusMap = {
+    0: '待创建',
     1: 'Unpaid',
     2: 'Canceled',
     3: 'Paid',
-    4: 'Refunded'
+    4: 'Refunded',
+    5: 'Timed out'
   }
   return statusMap[status] || 'Unknown'
 }
@@ -255,6 +328,23 @@ function programMeta(program) {
   const actor = program.actor || 'Artist pending'
   const place = program.place || 'Venue pending'
   return `${actor} / ${place}`
+}
+
+/**
+ * Formats numeric amounts for management summaries and tables.
+ */
+function formatCurrency(value) {
+  return Number(value || 0).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
+/**
+ * Converts a program business status to compact management text.
+ */
+function programStatusText(status) {
+  return Number(status) === 1 ? '在售' : '已下架'
 }
 
 /**
@@ -366,6 +456,11 @@ async function logout() {
     ticketUsers.value = []
     homePrograms.value = []
     selectedProgramDetail.value = null
+    adminDashboard.value = null
+    adminUsers.value = []
+    adminPrograms.value = []
+    adminOrders.value = []
+    adminTab.value = 'overview'
     viewMode.value = 'home'
     loading.value = false
   }
@@ -609,6 +704,255 @@ async function openProfileCenter() {
 }
 
 /**
+ * Opens the role-protected management console and loads its overview.
+ */
+async function openAdminCenter() {
+  if (!canAccessAdmin.value) {
+    setNotice('error', '当前账号没有管理端权限。')
+    return
+  }
+  viewMode.value = 'admin'
+  adminTab.value = 'overview'
+  programSheetOpen.value = false
+  selectedProgramDetail.value = null
+  await loadAdminDashboard()
+}
+
+/**
+ * Selects one management view and loads its current page.
+ */
+async function selectAdminTab(nextTab) {
+  adminTab.value = nextTab
+  if (nextTab === 'overview') {
+    await loadAdminDashboard()
+  } else if (nextTab === 'users') {
+    await loadAdminUsers()
+  } else if (nextTab === 'programs') {
+    await loadAdminPrograms()
+  } else if (nextTab === 'orders') {
+    await loadAdminOrders()
+  }
+}
+
+/**
+ * Loads management counters and recent orders.
+ */
+async function loadAdminDashboard() {
+  adminLoading.value = true
+  try {
+    const result = await request('/api/admin/dashboard')
+    adminDashboard.value = result.data
+    setNotice('success', '管理概览已刷新。')
+  } catch (error) {
+    adminDashboard.value = null
+    setNotice('error', error.message)
+  } finally {
+    adminLoading.value = false
+  }
+}
+
+/**
+ * Loads one filtered management user page.
+ */
+async function loadAdminUsers(resetPage = false) {
+  if (resetPage) {
+    adminPages.users = 1
+  }
+  adminLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      pageNumber: String(adminPages.users),
+      pageSize: String(adminPageSize)
+    })
+    appendOptionalParam(params, 'keyword', adminFilters.userKeyword.trim())
+    appendOptionalParam(params, 'role', adminFilters.userRole)
+    const result = await request(`/api/admin/users?${params.toString()}`)
+    adminUsers.value = result.data.items || []
+    adminTotals.users = Number(result.data.total || 0)
+    adminUsers.value.forEach((user) => {
+      adminRoleDrafts[user.id] = user.role
+    })
+  } catch (error) {
+    adminUsers.value = []
+    adminTotals.users = 0
+    setNotice('error', error.message)
+  } finally {
+    adminLoading.value = false
+  }
+}
+
+/**
+ * Loads one filtered management program page.
+ */
+async function loadAdminPrograms(resetPage = false) {
+  if (resetPage) {
+    adminPages.programs = 1
+  }
+  adminLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      pageNumber: String(adminPages.programs),
+      pageSize: String(adminPageSize)
+    })
+    appendOptionalParam(params, 'keyword', adminFilters.programKeyword.trim())
+    appendOptionalParam(params, 'programStatus', adminFilters.programStatus)
+    const result = await request(`/api/admin/programs?${params.toString()}`)
+    adminPrograms.value = result.data.items || []
+    adminTotals.programs = Number(result.data.total || 0)
+  } catch (error) {
+    adminPrograms.value = []
+    adminTotals.programs = 0
+    setNotice('error', error.message)
+  } finally {
+    adminLoading.value = false
+  }
+}
+
+/**
+ * Loads one filtered management order page.
+ */
+async function loadAdminOrders(resetPage = false) {
+  if (resetPage) {
+    adminPages.orders = 1
+  }
+  adminLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      pageNumber: String(adminPages.orders),
+      pageSize: String(adminPageSize)
+    })
+    appendOptionalParam(params, 'orderNumber', adminFilters.orderNumber)
+    appendOptionalParam(params, 'userId', adminFilters.orderUserId)
+    appendOptionalParam(params, 'programId', adminFilters.orderProgramId)
+    appendOptionalParam(params, 'orderStatus', adminFilters.orderStatus)
+    const result = await request(`/api/admin/orders?${params.toString()}`)
+    adminOrders.value = result.data.items || []
+    adminTotals.orders = Number(result.data.total || 0)
+  } catch (error) {
+    adminOrders.value = []
+    adminTotals.orders = 0
+    setNotice('error', error.message)
+  } finally {
+    adminLoading.value = false
+  }
+}
+
+/**
+ * Updates a managed account role and refreshes both users and overview.
+ */
+async function updateManagedUserRole(user) {
+  const nextRole = adminRoleDrafts[user.id]
+  if (!isAdministrator.value || !nextRole || nextRole === user.role) {
+    return
+  }
+  adminActionLoading.value = `user-${user.id}`
+  try {
+    await request(`/api/admin/users/${user.id}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role: nextRole })
+    })
+    setNotice('success', `用户 ${user.mobile} 已调整为 ${nextRole}。`)
+    await Promise.all([loadAdminUsers(), loadAdminDashboard()])
+  } catch (error) {
+    adminRoleDrafts[user.id] = user.role
+    setNotice('error', error.message)
+  } finally {
+    adminActionLoading.value = ''
+  }
+}
+
+/**
+ * Takes one program offline after an explicit operator confirmation.
+ */
+async function offlineManagedProgram(program) {
+  if (!window.confirm(`确认下架节目“${program.title}”吗？`)) {
+    return
+  }
+  adminActionLoading.value = `program-${program.id}`
+  try {
+    await request(`/api/admin/programs/${program.id}/offline`, { method: 'POST' })
+    setNotice('success', `节目已下架：${program.title}`)
+    await Promise.all([loadAdminPrograms(), loadAdminDashboard()])
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    adminActionLoading.value = ''
+  }
+}
+
+/**
+ * Triggers the protected timeout-order cancellation workflow.
+ */
+async function triggerTimeoutCancellation() {
+  if (!window.confirm('确认立即执行一次超时订单取消扫描吗？')) {
+    return
+  }
+  adminActionLoading.value = 'timeout'
+  try {
+    const result = await request('/api/admin/orders/timeout-cancel', { method: 'POST' })
+    const canceledCount = result.data?.result?.canceledCount ?? 0
+    setNotice('success', `超时取消执行完成，处理 ${canceledCount} 个订单。`)
+    await Promise.all([loadAdminDashboard(), adminTab.value === 'orders' ? loadAdminOrders() : Promise.resolve()])
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    adminActionLoading.value = ''
+  }
+}
+
+/**
+ * Triggers one due payment-event compensation scan.
+ */
+async function triggerPayCompensation() {
+  if (!window.confirm('确认立即执行一次支付事件补偿吗？')) {
+    return
+  }
+  adminActionLoading.value = 'pay'
+  try {
+    const result = await request('/api/admin/pay/events/compensate', { method: 'POST' })
+    const processedCount = result.data?.result?.processedCount ?? 0
+    setNotice('success', `支付补偿执行完成，处理 ${processedCount} 条事件。`)
+    await loadAdminDashboard()
+  } catch (error) {
+    setNotice('error', error.message)
+  } finally {
+    adminActionLoading.value = ''
+  }
+}
+
+/**
+ * Moves one management list page backward.
+ */
+async function previousAdminPage(type) {
+  if (adminPages[type] <= 1) {
+    return
+  }
+  adminPages[type] -= 1
+  await loadAdminPage(type)
+}
+
+/**
+ * Moves one management list page forward.
+ */
+async function nextAdminPage(type) {
+  adminPages[type] += 1
+  await loadAdminPage(type)
+}
+
+/**
+ * Dispatches a page reload to the selected management resource.
+ */
+async function loadAdminPage(type) {
+  if (type === 'users') {
+    await loadAdminUsers()
+  } else if (type === 'programs') {
+    await loadAdminPrograms()
+  } else {
+    await loadAdminOrders()
+  }
+}
+
+/**
  * Loads one page of orders for the current user.
  */
 async function loadOrders() {
@@ -739,14 +1083,30 @@ onMounted(loadCurrentUser)
     <section class="topbar">
       <div>
         <p class="eyebrow">DAMAI TICKET OPS</p>
-        <h1>{{ isLoggedIn ? 'Program Home' : 'Damai Ticket Management' }}</h1>
+        <h1>{{ pageTitle }}</h1>
       </div>
       <div v-if="isLoggedIn" class="topbar-actions">
-        <button class="ghost-button" type="button" :disabled="orderListLoading" @click="openProfileCenter">
+        <button v-if="viewMode !== 'home'" class="ghost-button icon-text" type="button" @click="initializeHome">
+          <House :size="16" aria-hidden="true" />
+          首页
+        </button>
+        <button
+          v-if="canAccessAdmin && viewMode !== 'admin'"
+          class="ghost-button icon-text"
+          type="button"
+          :disabled="adminLoading"
+          @click="openAdminCenter"
+        >
+          <LayoutDashboard :size="16" aria-hidden="true" />
+          管理控制台
+        </button>
+        <button class="ghost-button icon-text" type="button" :disabled="orderListLoading" @click="openProfileCenter">
+          <UserRound :size="16" aria-hidden="true" />
           个人中心
         </button>
-        <button class="ghost-button" :disabled="loading" @click="logout">
-          Logout
+        <button class="ghost-button icon-text" :disabled="loading" @click="logout">
+          <LogOut :size="16" aria-hidden="true" />
+          退出
         </button>
       </div>
     </section>
@@ -920,6 +1280,386 @@ onMounted(loadCurrentUser)
           </div>
         </article>
       </section>
+    </section>
+
+    <section v-else-if="viewMode === 'admin'" class="admin-layout">
+      <div class="detail-toolbar">
+        <button class="ghost-button icon-text" type="button" @click="initializeHome">
+          <ArrowLeft :size="16" aria-hidden="true" />
+          返回首页
+        </button>
+        <p :class="['notice', notice.type]">{{ notice.text }}</p>
+      </div>
+
+      <div class="admin-workspace">
+        <aside class="admin-sidebar">
+          <div class="admin-identity">
+            <span class="admin-avatar"><ShieldCheck :size="22" aria-hidden="true" /></span>
+            <div>
+              <strong>{{ currentUser.name || currentUser.username || currentUser.mobile }}</strong>
+              <span>{{ currentUser.role === 'ADMIN' ? '系统管理员' : '运营人员' }}</span>
+            </div>
+          </div>
+
+          <nav class="admin-nav" aria-label="管理功能">
+            <button type="button" :class="{ active: adminTab === 'overview' }" @click="selectAdminTab('overview')">
+              <LayoutDashboard :size="17" aria-hidden="true" />
+              经营概览
+            </button>
+            <button type="button" :class="{ active: adminTab === 'users' }" @click="selectAdminTab('users')">
+              <UserRoundCog :size="17" aria-hidden="true" />
+              用户管理
+            </button>
+            <button type="button" :class="{ active: adminTab === 'programs' }" @click="selectAdminTab('programs')">
+              <CalendarDays :size="17" aria-hidden="true" />
+              节目管理
+            </button>
+            <button type="button" :class="{ active: adminTab === 'orders' }" @click="selectAdminTab('orders')">
+              <ReceiptText :size="17" aria-hidden="true" />
+              订单管理
+            </button>
+          </nav>
+        </aside>
+
+        <section class="admin-content">
+          <header class="admin-header">
+            <div>
+              <p class="eyebrow">MANAGEMENT</p>
+              <h2 v-if="adminTab === 'overview'">经营概览</h2>
+              <h2 v-else-if="adminTab === 'users'">用户管理</h2>
+              <h2 v-else-if="adminTab === 'programs'">节目管理</h2>
+              <h2 v-else>订单管理</h2>
+            </div>
+            <div class="admin-header-actions">
+              <button
+                v-if="adminTab === 'overview'"
+                class="ghost-button icon-text"
+                type="button"
+                :disabled="Boolean(adminActionLoading)"
+                @click="triggerTimeoutCancellation"
+              >
+                <TimerReset :size="16" aria-hidden="true" />
+                执行超时取消
+              </button>
+              <button
+                v-if="adminTab === 'overview'"
+                class="ghost-button icon-text"
+                type="button"
+                :disabled="Boolean(adminActionLoading)"
+                @click="triggerPayCompensation"
+              >
+                <CircleDollarSign :size="16" aria-hidden="true" />
+                补偿支付事件
+              </button>
+              <button class="ghost-button icon-text" type="button" :disabled="adminLoading" @click="selectAdminTab(adminTab)">
+                <RefreshCw :size="16" :class="{ spinning: adminLoading }" aria-hidden="true" />
+                刷新
+              </button>
+            </div>
+          </header>
+
+          <div v-if="adminLoading" class="admin-loading">
+            <RefreshCw :size="22" class="spinning" aria-hidden="true" />
+            <span>正在加载管理数据</span>
+          </div>
+
+          <template v-else-if="adminTab === 'overview'">
+            <div v-if="adminDashboard" class="metric-grid">
+              <article class="metric-tile">
+                <span>注册用户</span>
+                <strong>{{ adminDashboard.totalUsers }}</strong>
+                <small>累计账号数</small>
+              </article>
+              <article class="metric-tile">
+                <span>在售节目</span>
+                <strong>{{ adminDashboard.activePrograms }}</strong>
+                <small>当前可售节目</small>
+              </article>
+              <article class="metric-tile">
+                <span>待支付订单</span>
+                <strong>{{ adminDashboard.pendingPaymentOrders }}</strong>
+                <small>等待用户支付</small>
+              </article>
+              <article class="metric-tile">
+                <span>已支付订单</span>
+                <strong>{{ adminDashboard.paidOrders }}</strong>
+                <small>支付完成订单</small>
+              </article>
+              <article class="metric-tile">
+                <span>超时订单</span>
+                <strong>{{ adminDashboard.timeoutOrders }}</strong>
+                <small>已自动释放库存</small>
+              </article>
+              <article class="metric-tile">
+                <span>支付金额</span>
+                <strong class="metric-money">¥{{ formatCurrency(adminDashboard.paidAmount) }}</strong>
+                <small>已支付订单总额</small>
+              </article>
+            </div>
+
+            <section class="admin-panel">
+              <div class="admin-panel-heading">
+                <div>
+                  <p class="eyebrow">RECENT ORDERS</p>
+                  <h3>最新订单</h3>
+                </div>
+                <button class="text-action" type="button" @click="selectAdminTab('orders')">查看全部</button>
+              </div>
+              <div v-if="!adminDashboard?.recentOrders?.length" class="admin-empty">暂无订单数据</div>
+              <div v-else class="admin-table-wrap">
+                <table class="admin-table order-table">
+                  <thead>
+                    <tr>
+                      <th>订单号</th>
+                      <th>节目</th>
+                      <th>用户 / 节目 ID</th>
+                      <th>金额</th>
+                      <th>状态</th>
+                      <th>创建时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="order in adminDashboard.recentOrders" :key="order.id">
+                      <td class="mono-cell">{{ order.orderNumber }}</td>
+                      <td><strong class="table-primary">{{ order.programTitle || '节目快照缺失' }}</strong></td>
+                      <td>{{ order.userId }} / {{ order.programId }}</td>
+                      <td>¥{{ formatCurrency(order.orderPrice) }}</td>
+                      <td><span :class="orderStatusClass(order.orderStatus)">{{ orderStatusText(order.orderStatus) }}</span></td>
+                      <td>{{ formatDateTime(order.createdAt) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </template>
+
+          <template v-else-if="adminTab === 'users'">
+            <form class="admin-filters user-filters" @submit.prevent="loadAdminUsers(true)">
+              <label>
+                <span>账号关键词</span>
+                <input v-model.trim="adminFilters.userKeyword" placeholder="姓名、手机号或邮箱" maxlength="100" />
+              </label>
+              <label>
+                <span>角色</span>
+                <select v-model="adminFilters.userRole">
+                  <option value="">全部角色</option>
+                  <option value="USER">普通用户</option>
+                  <option value="OPERATOR">运营人员</option>
+                  <option value="ADMIN">系统管理员</option>
+                </select>
+              </label>
+              <button class="primary-button icon-text" type="submit">
+                <Search :size="16" aria-hidden="true" />
+                查询
+              </button>
+            </form>
+
+            <div class="admin-result-bar">
+              <span>共 {{ adminTotals.users }} 个用户</span>
+              <small v-if="!isAdministrator">运营人员仅可查看账号角色</small>
+            </div>
+            <div v-if="adminUsers.length === 0" class="admin-empty">没有符合条件的用户</div>
+            <div v-else class="admin-table-wrap">
+              <table class="admin-table user-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>用户</th>
+                    <th>联系方式</th>
+                    <th>角色</th>
+                    <th>注册时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="user in adminUsers" :key="user.id">
+                    <td class="mono-cell">{{ user.id }}</td>
+                    <td><strong class="table-primary">{{ user.name || '未设置姓名' }}</strong></td>
+                    <td>
+                      <span class="table-stack">{{ user.mobile || '未设置手机' }}<small>{{ user.email || '未设置邮箱' }}</small></span>
+                    </td>
+                    <td>
+                      <select v-if="isAdministrator" v-model="adminRoleDrafts[user.id]" class="compact-select">
+                        <option value="USER">普通用户</option>
+                        <option value="OPERATOR">运营人员</option>
+                        <option value="ADMIN">系统管理员</option>
+                      </select>
+                      <span v-else class="role-pill">{{ user.role }}</span>
+                    </td>
+                    <td>{{ formatDateTime(user.createdAt) }}</td>
+                    <td>
+                      <button
+                        v-if="isAdministrator"
+                        class="table-action"
+                        type="button"
+                        :disabled="adminRoleDrafts[user.id] === user.role || adminActionLoading === `user-${user.id}`"
+                        @click="updateManagedUserRole(user)"
+                      >
+                        保存角色
+                      </button>
+                      <span v-else class="muted">只读</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="admin-pagination">
+              <button class="icon-button" type="button" title="上一页" aria-label="上一页" :disabled="adminPages.users <= 1" @click="previousAdminPage('users')">
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </button>
+              <span>第 {{ adminPages.users }} 页</span>
+              <button class="icon-button" type="button" title="下一页" aria-label="下一页" :disabled="!hasNextAdminUserPage" @click="nextAdminPage('users')">
+                <ChevronRight :size="18" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="adminTab === 'programs'">
+            <form class="admin-filters program-filters" @submit.prevent="loadAdminPrograms(true)">
+              <label>
+                <span>节目关键词</span>
+                <input v-model.trim="adminFilters.programKeyword" placeholder="节目标题" maxlength="100" />
+              </label>
+              <label>
+                <span>售卖状态</span>
+                <select v-model="adminFilters.programStatus">
+                  <option value="">全部状态</option>
+                  <option value="1">在售</option>
+                  <option value="0">已下架</option>
+                </select>
+              </label>
+              <button class="primary-button icon-text" type="submit">
+                <Search :size="16" aria-hidden="true" />
+                查询
+              </button>
+            </form>
+
+            <div class="admin-result-bar"><span>共 {{ adminTotals.programs }} 个节目</span></div>
+            <div v-if="adminPrograms.length === 0" class="admin-empty">没有符合条件的节目</div>
+            <div v-else class="admin-table-wrap">
+              <table class="admin-table program-admin-table">
+                <thead>
+                  <tr>
+                    <th>节目</th>
+                    <th>地区 / 分类 ID</th>
+                    <th>票档库存</th>
+                    <th>状态</th>
+                    <th>上架时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="program in adminPrograms" :key="program.id">
+                    <td>
+                      <strong class="table-primary">{{ program.title }}</strong>
+                      <small class="table-secondary">ID {{ program.id }}</small>
+                    </td>
+                    <td>{{ program.areaId }} / {{ program.programCategoryId }}</td>
+                    <td><span class="stock-value">{{ program.remainingStock }} / {{ program.totalStock }}</span></td>
+                    <td>
+                      <span :class="['program-status', Number(program.programStatus) === 1 ? 'on-sale' : 'offline']">
+                        {{ programStatusText(program.programStatus) }}
+                      </span>
+                    </td>
+                    <td>{{ formatDateTime(program.issueTime) }}</td>
+                    <td>
+                      <button
+                        class="table-action danger"
+                        type="button"
+                        :disabled="Number(program.programStatus) !== 1 || adminActionLoading === `program-${program.id}`"
+                        @click="offlineManagedProgram(program)"
+                      >
+                        <Power :size="15" aria-hidden="true" />
+                        下架
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="admin-pagination">
+              <button class="icon-button" type="button" title="上一页" aria-label="上一页" :disabled="adminPages.programs <= 1" @click="previousAdminPage('programs')">
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </button>
+              <span>第 {{ adminPages.programs }} 页</span>
+              <button class="icon-button" type="button" title="下一页" aria-label="下一页" :disabled="!hasNextAdminProgramPage" @click="nextAdminPage('programs')">
+                <ChevronRight :size="18" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <form class="admin-filters order-filters" @submit.prevent="loadAdminOrders(true)">
+              <label>
+                <span>订单号</span>
+                <input v-model.trim="adminFilters.orderNumber" inputmode="numeric" placeholder="完整订单号" />
+              </label>
+              <label>
+                <span>用户 ID</span>
+                <input v-model.trim="adminFilters.orderUserId" inputmode="numeric" placeholder="用户 ID" />
+              </label>
+              <label>
+                <span>节目 ID</span>
+                <input v-model.trim="adminFilters.orderProgramId" inputmode="numeric" placeholder="节目 ID" />
+              </label>
+              <label>
+                <span>订单状态</span>
+                <select v-model="adminFilters.orderStatus">
+                  <option value="">全部状态</option>
+                  <option value="0">待创建</option>
+                  <option value="1">待支付</option>
+                  <option value="2">已取消</option>
+                  <option value="3">已支付</option>
+                  <option value="4">已退款</option>
+                  <option value="5">已超时</option>
+                </select>
+              </label>
+              <button class="primary-button icon-text" type="submit">
+                <Search :size="16" aria-hidden="true" />
+                查询
+              </button>
+            </form>
+
+            <div class="admin-result-bar"><span>共 {{ adminTotals.orders }} 个订单</span></div>
+            <div v-if="adminOrders.length === 0" class="admin-empty">没有符合条件的订单</div>
+            <div v-else class="admin-table-wrap">
+              <table class="admin-table order-table">
+                <thead>
+                  <tr>
+                    <th>订单号</th>
+                    <th>节目</th>
+                    <th>用户 / 节目 ID</th>
+                    <th>金额</th>
+                    <th>状态</th>
+                    <th>创建 / 过期时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="order in adminOrders" :key="order.id">
+                    <td class="mono-cell">{{ order.orderNumber }}</td>
+                    <td><strong class="table-primary">{{ order.programTitle || '节目快照缺失' }}</strong></td>
+                    <td>{{ order.userId }} / {{ order.programId }}</td>
+                    <td>¥{{ formatCurrency(order.orderPrice) }}</td>
+                    <td><span :class="orderStatusClass(order.orderStatus)">{{ orderStatusText(order.orderStatus) }}</span></td>
+                    <td>
+                      <span class="table-stack">{{ formatDateTime(order.createdAt) }}<small>{{ formatDateTime(order.expireTime) }}</small></span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="admin-pagination">
+              <button class="icon-button" type="button" title="上一页" aria-label="上一页" :disabled="adminPages.orders <= 1" @click="previousAdminPage('orders')">
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </button>
+              <span>第 {{ adminPages.orders }} 页</span>
+              <button class="icon-button" type="button" title="下一页" aria-label="下一页" :disabled="!hasNextAdminOrderPage" @click="nextAdminPage('orders')">
+                <ChevronRight :size="18" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+        </section>
+      </div>
     </section>
 
     <section v-else-if="viewMode === 'profile'" class="profile-layout">

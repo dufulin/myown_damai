@@ -65,13 +65,13 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
     }
 
     /**
-     * Creates the program detail index with a mapping only when it does not already exist.
+     * Ensures the program detail index exists and reports whether it can receive documents.
      */
     @Override
     public boolean createProgramDetailIndexIfAbsent() {
         if (programDetailIndexExists()) {
             LOGGER.info("program detail es index already exists, indexName={}", indexName);
-            return false;
+            return true;
         }
         String mapping = """
                 {
@@ -143,7 +143,7 @@ public class ElasticsearchProgramSearchGateway implements ProgramSearchGateway {
         }
         if (response.statusCode() == 400 && response.body().contains("resource_already_exists_exception")) {
             LOGGER.info("program detail es index already exists, indexName={}", indexName);
-            return false;
+            return true;
         }
         LOGGER.warn("program detail es index ensure failed, indexName={}, status={}, body={}", indexName, response.statusCode(), response.body());
         return false;

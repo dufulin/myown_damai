@@ -1,5 +1,7 @@
 package com.myown.damai.common.cache;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Optional;
@@ -28,6 +30,9 @@ public class RedisStringCacheClient {
     private final boolean enabled;
     private final long minJitterSeconds;
     private final long maxJitterSeconds;
+    private final Counter cacheHitCounter;
+    private final Counter cacheMissCounter;
+    private final Counter cacheErrorCounter;
 
     /**
      * Creates the cache client with Redis access and jitter settings.
@@ -36,12 +41,16 @@ public class RedisStringCacheClient {
             StringRedisTemplate redisTemplate,
             boolean enabled,
             long minJitterSeconds,
-            long maxJitterSeconds
+            long maxJitterSeconds,
+            MeterRegistry meterRegistry
     ) {
         this.redisTemplate = redisTemplate;
         this.enabled = enabled;
         this.minJitterSeconds = Math.max(0, minJitterSeconds);
         this.maxJitterSeconds = Math.max(this.minJitterSeconds, maxJitterSeconds);
+        this.cacheHitCounter = buildCacheCounter(meterRegistry, "hit");
+        this.cacheMissCounter = buildCacheCounter(meterRegistry, "miss");
+        this.cacheErrorCounter = buildCacheCounter(meterRegistry, "error");
     }
 
     /**
@@ -52,8 +61,15 @@ public class RedisStringCacheClient {
             return Optional.empty();
         }
         try {
-            return Optional.ofNullable(redisTemplate.opsForValue().get(key));
+            String value = redisTemplate.opsForValue().get(key);
+            if (value == null) {
+                cacheMissCounter.increment();
+            } else {
+                cacheHitCounter.increment();
+            }
+            return Optional.ofNullable(value);
         } catch (RuntimeException exception) {
+            cacheErrorCounter.increment();
             LOGGER.warn("redis get failed, key={}", key, exception);
             return Optional.empty();
         }
@@ -196,5 +212,15 @@ public class RedisStringCacheClient {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    /**
+     * Builds one Redis request counter used to calculate cache hit and error ratios.
+     */
+    private Counter buildCacheCounter(MeterRegistry meterRegistry, String result) {
+        return Counter.builder("damai.cache.requests")
+                .description("Damai Redis cache read outcomes")
+                .tag("result", result)
+                .register(meterRegistry);
     }
 }

@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 public class NoopProgramSearchGateway implements ProgramSearchGateway {
 
     /**
-     * Reports that no search index should be initialized while search is disabled.
+     * Reports that no search index is available while search is disabled.
      */
     @Override
     public boolean createProgramDetailIndexIfAbsent() {

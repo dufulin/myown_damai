@@ -2,6 +2,7 @@ package com.myown.damai.pay.controller;
 
 import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.pay.dto.PagePayRequest;
 import com.myown.damai.pay.dto.PagePayResponse;
@@ -52,6 +53,8 @@ public class PayController {
             @Valid @RequestBody PagePayRequest request
     ) {
         Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        TraceContext.putUserId(authenticatedUserId);
+        TraceContext.putOrderNumber(request.orderNumber());
         LOGGER.info("mock alipay pay request received, orderNumber={}, userId={}", request.orderNumber(), authenticatedUserId);
         PagePayResponse response = payService.createAlipayPagePay(request, authenticatedUserId);
         LOGGER.info("mock alipay pay request succeeded, orderNumber={}, payBillId={}", request.orderNumber(), response.payBillId());
@@ -63,6 +66,7 @@ public class PayController {
      */
     @PostMapping(value = "/alipay/notify", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
     public String handleAlipayNotify(@RequestParam Map<String, String> notifyParams) {
+        TraceContext.putOrderNumber(notifyParams.get("out_trade_no"));
         LOGGER.info("alipay notify request received, outTradeNo={}, tradeStatus={}", notifyParams.get("out_trade_no"), notifyParams.get("trade_status"));
         try {
             String result = payService.handleAlipayNotify(notifyParams);

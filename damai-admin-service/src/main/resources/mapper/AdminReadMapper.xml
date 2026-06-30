@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myown.damai.admin.mapper.AdminReadMapper">
+
+    <resultMap id="adminUserResult" type="com.myown.damai.admin.dto.AdminUserResponse">
+        <constructor>
+            <arg column="id" javaType="java.lang.Long"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="mobile" javaType="java.lang.String"/>
+            <arg column="email" javaType="java.lang.String"/>
+            <arg column="role" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.Integer"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="adminProgramResult" type="com.myown.damai.admin.dto.AdminProgramResponse">
+        <constructor>
+            <arg column="id" javaType="java.lang.Long"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="area_id" javaType="java.lang.Long"/>
+            <arg column="program_category_id" javaType="java.lang.Long"/>
+            <arg column="program_status" javaType="java.lang.Integer"/>
+            <arg column="total_stock" javaType="java.lang.Long"/>
+            <arg column="remaining_stock" javaType="java.lang.Long"/>
+            <arg column="issue_time" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="adminOrderResult" type="com.myown.damai.admin.dto.AdminOrderResponse">
+        <constructor>
+            <arg column="id" javaType="java.lang.Long"/>
+            <arg column="order_number" javaType="java.lang.Long"/>
+            <arg column="user_id" javaType="java.lang.Long"/>
+            <arg column="program_id" javaType="java.lang.Long"/>
+            <arg column="program_title" javaType="java.lang.String"/>
+            <arg column="order_price" javaType="java.math.BigDecimal"/>
+            <arg column="order_status" javaType="java.lang.Integer"/>
+            <arg column="expire_time" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="paid_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="userFilters">
+        WHERE u.status = 1
+        <if test="keyword != null and keyword != ''">
+            AND (
+                u.name LIKE CONCAT('%', #{keyword}, '%')
+                OR u.mobile LIKE CONCAT('%', #{keyword}, '%')
+                OR u.email LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="role != null and role != ''">
+            AND COALESCE(r.role, 'USER') = #{role}
+        </if>
+    </sql>
+
+    <sql id="programFilters">
+        WHERE p.status = 1
+        <if test="keyword != null and keyword != ''">
+            AND p.title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="programStatus != null">
+            AND p.program_status = #{programStatus}
+        </if>
+    </sql>
+
+    <sql id="orderFilters">
+        WHERE o.status = 1
+        <if test="orderNumber != null">
+            AND o.order_number = #{orderNumber}
+        </if>
+        <if test="userId != null">
+            AND o.user_id = #{userId}
+        </if>
+        <if test="programId != null">
+            AND o.program_id = #{programId}
+        </if>
+        <if test="orderStatus != null">
+            AND o.order_status = #{orderStatus}
+        </if>
+    </sql>
+
+    <select id="countUsers" resultType="long">
+        SELECT COUNT(*)
+        FROM d_user
+        WHERE status = 1
+    </select>
+
+    <select id="countActivePrograms" resultType="long">
+        SELECT COUNT(*)
+        FROM d_program
+        WHERE status = 1
+          AND program_status = 1
+    </select>
+
+    <select id="countOrdersByStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM d_order
+        WHERE status = 1
+          AND order_status = #{orderStatus}
+    </select>
+
+    <select id="sumPaidAmount" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(pay_amount), 0)
+        FROM d_pay_bill
+        WHERE status = 1
+          AND pay_bill_status = 2
+    </select>
+
+    <select id="listUsers" resultMap="adminUserResult">
+        SELECT
+            u.id,
+            u.name,
+            u.mobile,
+            u.email,
+            COALESCE(r.role, 'USER') AS role,
+            u.status,
+            u.create_time AS created_at
+        FROM d_user u
+        LEFT JOIN d_user_role r ON r.user_id = u.id
+        <include refid="userFilters"/>
+        ORDER BY u.create_time DESC, u.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countFilteredUsers" resultType="long">
+        SELECT COUNT(*)
+        FROM d_user u
+        LEFT JOIN d_user_role r ON r.user_id = u.id
+        <include refid="userFilters"/>
+    </select>
+
+    <select id="listPrograms" resultMap="adminProgramResult">
+        SELECT
+            p.id,
+            p.title,
+            p.area_id,
+            p.program_category_id,
+            p.program_status,
+            COALESCE(stock.total_stock, 0) AS total_stock,
+            COALESCE(stock.remaining_stock, 0) AS remaining_stock,
+            p.issue_time,
+            p.create_time AS created_at
+        FROM d_program p
+        LEFT JOIN (
+            SELECT
+                program_id,
+                SUM(total_number) AS total_stock,
+                SUM(remain_number) AS remaining_stock
+            FROM d_ticket_category
+            WHERE status = 1
+            GROUP BY program_id
+        ) stock ON stock.program_id = p.id
+        <include refid="programFilters"/>
+        ORDER BY p.create_time DESC, p.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countFilteredPrograms" resultType="long">
+        SELECT COUNT(*)
+        FROM d_program p
+        <include refid="programFilters"/>
+    </select>
+
+    <select id="listOrders" resultMap="adminOrderResult">
+        SELECT
+            o.id,
+            o.order_number,
+            o.user_id,
+            o.program_id,
+            o.program_title,
+            o.order_price,
+            o.order_status,
+            o.expire_time,
+            o.create_order_time AS created_at,
+            o.pay_order_time AS paid_at
+        FROM d_order o
+        <include refid="orderFilters"/>
+        ORDER BY o.create_order_time DESC, o.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countFilteredOrders" resultType="long">
+        SELECT COUNT(*)
+        FROM d_order o
+        <include refid="orderFilters"/>
+    </select>
+</mapper>

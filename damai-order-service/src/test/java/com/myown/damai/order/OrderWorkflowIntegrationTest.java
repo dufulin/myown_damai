@@ -112,7 +112,8 @@ class OrderWorkflowIntegrationTest {
                 "order-create:" + orderNumber,
                 orderNumber,
                 request,
-                programSnapshot(programId)
+                programSnapshot(programId),
+                "test-trace-id"
         );
         String payload = objectMapper.writeValueAsString(message);
         OrderAsyncProducer retryProducer = mock(OrderAsyncProducer.class);

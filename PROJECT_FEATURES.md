@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-当前项目是一个前后端分离的单库版大麦票务管理系统。后端已按 Spring Cloud 拆分为网关、用户、节目、订单、支付和公共模块；前端使用 Vue 3 + Vite 实现基础购票流程。
+当前项目是一个前后端分离的单库版大麦票务管理系统。后端已按 Spring Cloud 拆分为网关、用户、节目、订单、支付、管理和公共模块；前端使用 Vue 3 + Vite 实现基础购票流程。
 
 统一前端 API 访问入口：
 
@@ -16,21 +16,213 @@ http://127.0.0.1:8080
 http://127.0.0.1:5173
 ```
 
+## 文档导航
+
+1. [系统架构图](#系统架构图)
+2. [启动依赖图](#启动依赖图)
+3. [核心下单时序图](#核心下单时序图)
+4. [已实现功能](#已实现功能)
+5. [后端接口](#后端接口)
+6. [数据库表](#数据库表)
+7. [启动方式](#启动方式)
+8. [测试与构建](#测试与构建)
+
+## 系统架构图
+
+```mermaid
+flowchart LR
+    FE["Vue 3 前端<br/>5173"] -->|"HTTP API"| GW["Spring Cloud Gateway<br/>8080"]
+
+    GW -->|"用户与登录"| USER["用户服务<br/>8081"]
+    GW -->|"节目与搜索"| PROGRAM["节目服务<br/>8082"]
+    GW -->|"订单"| ORDER["订单服务<br/>8083"]
+    GW -->|"支付"| PAY["支付服务<br/>8084"]
+    GW -->|"运营管理"| ADMIN["管理服务<br/>8085"]
+
+    ORDER -->|"校验购票人"| USER
+    ORDER -->|"节目快照与库存流转"| PROGRAM
+    PAY -->|"支付结果与补偿事件"| ORDER
+    ADMIN -->|"角色调整"| USER
+    ADMIN -->|"节目下架"| PROGRAM
+    ADMIN -->|"超时取消"| ORDER
+    ADMIN -->|"支付补偿"| PAY
+
+    ORDER -->|"异步下单消息"| KAFKA["Kafka"]
+    PROGRAM -->|"节目变更事件"| KAFKA
+    KAFKA -->|"消费建单"| ORDER
+    KAFKA -->|"同步搜索索引"| PROGRAM
+    ZK["Zookeeper"] --> KAFKA
+
+    USER --> MYSQL[("MySQL 5.7")]
+    PROGRAM --> MYSQL
+    ORDER --> MYSQL
+    PAY --> MYSQL
+    ADMIN -->|"只读管理聚合"| MYSQL
+
+    USER --> REDIS[("Redis 6")]
+    PROGRAM --> REDIS
+    ORDER -->|"分布式锁与待创建标记"| REDIS
+    GW -->|"限流计数"| REDIS
+
+    PROGRAM --> ES[("Elasticsearch 8")]
+
+    NACOS["Nacos"] -. "注册与发现" .-> GW
+    NACOS -. "注册与发现" .-> USER
+    NACOS -. "注册与发现" .-> PROGRAM
+    NACOS -. "注册与发现" .-> ORDER
+    NACOS -. "注册与发现" .-> PAY
+    NACOS -. "注册与发现" .-> ADMIN
+
+    PROM["Prometheus"] -. "Actuator 指标采集" .-> GW
+    PROM -. "Actuator 指标采集" .-> USER
+    PROM -. "Actuator 指标采集" .-> PROGRAM
+    PROM -. "Actuator 指标采集" .-> ORDER
+    PROM -. "Actuator 指标采集" .-> PAY
+    PROM -. "Actuator 指标采集" .-> ADMIN
+```
+
+系统对外只暴露网关。用户身份由网关校验后通过可信请求头传给下游；订单服务负责交易编排，节目服务负责节目、
+票档、库存和座位，支付服务通过本地事件补偿订单状态。管理服务读取单库聚合视图，但所有运营写操作仍委托给业务服务，
+不会绕过订单状态机、节目缓存失效或支付补偿流程。
+
+## 启动依赖图
+
+```mermaid
+flowchart TD
+    COMPOSE["docker compose up -d --wait"]
+    COMPOSE --> MYSQL["MySQL 健康"]
+    COMPOSE --> REDIS["Redis 健康"]
+    COMPOSE --> NACOS["Nacos 健康"]
+    COMPOSE --> ES["Elasticsearch 健康"]
+    COMPOSE --> ZK["Zookeeper 健康"]
+    ZK --> KAFKA["Kafka 健康"]
+    COMPOSE --> PROM["Prometheus 健康"]
+
+    MYSQL --> USER["启动用户服务"]
+    REDIS --> USER
+    NACOS --> USER
+
+    MYSQL --> PROGRAM["启动节目服务"]
+    REDIS --> PROGRAM
+    NACOS --> PROGRAM
+    ES --> PROGRAM
+    KAFKA --> PROGRAM
+
+    MYSQL --> ORDER["启动订单服务"]
+    REDIS --> ORDER
+    NACOS --> ORDER
+    KAFKA --> ORDER
+    USER --> ORDER
+    PROGRAM --> ORDER
+
+    MYSQL --> PAY["启动支付服务"]
+    NACOS --> PAY
+    ORDER --> PAY
+
+    MYSQL --> ADMIN["启动管理服务"]
+    NACOS --> ADMIN
+    USER --> ADMIN
+    PROGRAM --> ADMIN
+    ORDER --> ADMIN
+    PAY --> ADMIN
+
+    REDIS --> GW["启动网关服务"]
+    NACOS --> GW
+    USER --> GW
+    PROGRAM --> GW
+    ORDER --> GW
+    PAY --> GW
+    ADMIN --> GW
+
+    GW --> FRONTEND["启动 Vue 前端"]
+
+    PROM -. "抓取指标" .-> GW
+    PROM -. "抓取指标" .-> USER
+    PROM -. "抓取指标" .-> PROGRAM
+    PROM -. "抓取指标" .-> ORDER
+    PROM -. "抓取指标" .-> PAY
+    PROM -. "抓取指标" .-> ADMIN
+```
+
+推荐顺序是：先启动 Compose 基础设施，再启动用户和节目服务，然后启动订单、支付、管理、网关，最后启动前端。
+Prometheus 可以与其他基础设施同时启动；Java 服务启动后，其抓取目标会从 `DOWN` 自动变为 `UP`。
+
+## 核心下单时序图
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer as 用户
+    participant FE as Vue 前端
+    participant GW as 网关
+    participant USER as 用户服务
+    participant ORDER as 订单服务
+    participant PROGRAM as 节目服务
+    participant REDIS as Redis 与 Redisson
+    participant KAFKA as Kafka
+    participant DB as MySQL
+    participant PAY as 支付服务
+
+    Customer->>FE: 选择场次、票档和购票人
+    FE->>GW: POST /api/orders
+    GW->>USER: 校验 access token
+    USER-->>GW: 返回可信 userId 与角色
+    GW->>ORDER: 透传 userId、traceId 和下单参数
+
+    ORDER->>DB: 校验用户与节目幂等订单
+    ORDER->>USER: 校验购票人归属
+    USER-->>ORDER: 校验通过
+    ORDER->>PROGRAM: 查询节目、场次、票档与实时价格
+    PROGRAM-->>ORDER: 返回权威下单快照
+    ORDER->>REDIS: 写入用户与节目待创建标记
+    ORDER->>DB: 保存异步消息追踪记录
+    ORDER->>KAFKA: 按 programId 分区发送建单消息
+    ORDER-->>GW: 返回订单编号与待创建状态
+    GW-->>FE: 返回订单编号
+
+    KAFKA-->>ORDER: 消费建单消息
+    ORDER->>REDIS: 获取节目级分布式锁
+    ORDER->>DB: 锁内再次执行幂等校验
+    ORDER->>PROGRAM: 原子扣减票档库存并锁定座位
+    Note over ORDER,PROGRAM: 预留 TODO 接入更完整的选座与匹座策略
+    PROGRAM-->>ORDER: 库存和座位锁定成功
+    ORDER->>DB: 事务写入主订单与购票人明细
+    ORDER->>DB: 消息状态更新为成功
+    ORDER->>REDIS: 清理待创建标记并释放锁
+
+    alt 用户完成模拟支付
+        FE->>GW: 创建支付账单
+        GW->>PAY: 透传支付请求
+        PAY->>DB: 支付单与本地事件落库
+        PAY->>ORDER: 补偿事件通知支付成功
+        ORDER->>PROGRAM: 座位和库存转为已售
+        ORDER->>DB: 状态机流转为已支付
+    else 订单超时未支付
+        ORDER->>DB: 超时任务流转为已超时
+        ORDER->>PROGRAM: 释放票档库存和锁定座位
+    end
+```
+
+异步消息携带唯一消息键、订单编号、权威节目快照和 traceId。消费者通过消息状态表保证幂等，失败时进入重试主题，
+超过重试次数后进入死信主题；支付、取消和超时更新必须通过订单状态机，避免并发覆盖终态。
+
 ## 服务模块
 
-1. `damai-common`：公共响应对象、业务异常、全局异常处理、身份与角色请求头、Redis 缓存工具、布隆过滤器。
+1. `damai-common`：公共响应对象、业务异常、全局异常处理、身份与角色请求头、Redis 缓存工具、布隆过滤器和可观测性基础设施。
 2. `damai-gateway-service`：网关服务，默认端口 `8080`。
 3. `damai-user-service`：用户服务，默认端口 `8081`。
 4. `damai-program-service`：节目服务，默认端口 `8082`。
 5. `damai-order-service`：订单服务，默认端口 `8083`。
 6. `damai-pay-service`：支付服务，默认端口 `8084`。
-7. `frontend`：Vue 前端项目。
+7. `damai-admin-service`：管理服务，默认端口 `8085`。
+8. `frontend`：Vue 前端项目。
+9. `deploy/prometheus`：Prometheus 抓取配置和核心指标聚合规则。
 
 ## 已实现功能
 
 ### 网关服务
 
-1. 统一转发 `/api/users/**`、`/api/programs/**`、`/api/orders/**`、`/api/pay/**`。
+1. 统一转发 `/api/users/**`、`/api/programs/**`、`/api/orders/**`、`/api/pay/**`、`/api/admin/**`。
 2. 除注册、登录、预检请求和支付宝异步通知外，其他接口都需要登录态。
 3. 调用用户服务校验 token，并将可信用户 ID、角色写入 `X-Damai-User-Id`、`X-Damai-User-Role` 请求头透传到下游。
 4. 下游订单、支付、购票人接口只信任网关透传身份，不信任前端传入的 `userId`。
@@ -74,7 +266,7 @@ http://127.0.0.1:5173
 5. 节目详情优先从 ES 查询，未命中再查数据库。
 6. 节目详情按节目 ID 查询 Redis，未命中时查数据库并回写 Redis。
 7. 节目详情缓存使用统一 key、TTL 抖动、空值缓存、互斥重建和布隆过滤器。
-8. 项目启动后异步初始化 ES：检查索引、创建 mapping、查询节目 ID、统计票档最低/最高价、构建完整节目文档。
+8. 项目启动后异步同步 ES：索引不存在时创建 mapping，索引已存在时仍会按数据库在售节目重新写入文档，避免空索引或旧索引遮蔽 MySQL 数据。
 9. 支持节目变更事件同步 ES：节目创建、下架、票价变化会发布 Kafka 事件，消费者异步更新或删除搜索索引。
 10. 支持节目下架。
 11. 支持票档价格更新。
@@ -83,6 +275,7 @@ http://127.0.0.1:5173
 14. 座位状态支持可售、锁定、已售、释放流转。
 15. 接口和关键业务逻辑已添加 SLF4J 日志。
 16. 提供仅供订单服务调用的下单快照接口，直接从节目数据库校验节目、场次、票档归属并返回实时票价。
+17. 首页和智能搜索在 ES 返回空结果时回退 MySQL，并自动失效 Redis 中由旧索引产生的空列表缓存。
 
 ### 订单服务
 
@@ -119,6 +312,20 @@ http://127.0.0.1:5173
 9. 支付服务调用订单服务已配置连接超时、响应超时、请求超时、有限重试和 Resilience4j 熔断降级。
 10. 接口和关键业务逻辑已添加 SLF4J 日志。
 
+### 管理服务
+
+1. 提供独立的 `damai-admin-service`，通过网关 `/api/admin/**` 暴露统一管理入口。
+2. 管理概览聚合用户总数、在售节目数、待支付/已支付/已超时订单数、已支付金额和最近订单。
+3. 用户管理支持按姓名、手机号、邮箱关键词和角色分页筛选。
+4. 节目管理支持按标题、在售状态分页筛选，并聚合票档总库存和剩余库存。
+5. 订单管理支持按订单号、用户 ID、节目 ID、订单状态分页筛选。
+6. 运营人员和管理员可以读取管理数据；普通用户会被网关和管理服务双重拒绝。
+7. 只有管理员可以调整用户角色，且禁止给普通账号分配内部 `SYSTEM` 角色。
+8. 支持节目下架、超时订单取消和支付事件补偿的统一运营入口。
+9. 管理查询采用单库只读聚合；所有业务写操作委托给用户、节目、订单、支付服务执行。
+10. 下游运营动作配置了连接/响应超时、Resilience4j 熔断和 traceId 透传，不对写操作自动重试。
+11. 接口和运营动作均记录 operatorUserId、目标资源和执行结果日志。
+
 ### 缓存与配置治理
 
 1. MySQL、Redis、Kafka、ES、Nacos 地址已通过环境变量和 profile 管理。
@@ -126,6 +333,19 @@ http://127.0.0.1:5173
 3. Redis key 命名已沉淀到公共模块，避免各服务各写一套。
 4. 缓存工具支持统一 TTL、随机抖动、空值缓存和互斥重建。
 5. 布隆过滤器已放入公共模块，可复用于 ID 型缓存穿透防护。
+6. 提供 Docker Compose 一键启动 MySQL、Redis、Nacos、ES、Zookeeper、Kafka 和 Prometheus，统一命名卷、网络、健康检查及宿主机/容器内地址。
+
+### 可观测性
+
+1. 网关为请求生成或透传 `X-Trace-Id`，并向下游 HTTP 调用和 Kafka 消息传播。
+2. 日志统一输出 `traceId`、`userId`、`orderNumber`、`programId` 四个诊断字段。
+3. 所有后端服务接入 Actuator，并暴露健康检查、指标和 Prometheus 抓取端点。
+4. Prometheus Compose 服务默认抓取网关、用户、节目、订单、支付和管理服务。
+5. HTTP 指标支持统计 QPS、状态码错误率和请求耗时。
+6. Kafka 客户端指标支持查看消费者最大积压。
+7. Redis 公共缓存客户端记录命中、未命中和访问错误次数，可计算缓存命中率。
+8. 订单创建耗时区分同步建单、异步请求提交和 Kafka 消费建单阶段。
+9. 提供 Prometheus 聚合规则，可直接查询 QPS、错误率、Kafka 积压、Redis 命中率和订单创建 P95 耗时。
 
 ### 前端页面
 
@@ -145,6 +365,12 @@ http://127.0.0.1:5173
 14. 个人中心支持添加、刷新、删除购票人。
 15. 未支付订单支持点击“支付宝支付”，当前会模拟支付成功并刷新订单状态。
 16. access token 仅保存在浏览器内存，页面刷新后通过 HttpOnly refresh Cookie 恢复登录态；接口 401 时自动刷新并重试一次。
+17. 运营人员和管理员登录后可从顶部进入管理控制台，普通用户不显示管理入口。
+18. 管理控制台提供经营概览，展示用户、节目、订单和支付金额指标及最新订单。
+19. 用户、节目、订单管理均支持条件筛选、分页和紧凑表格展示。
+20. 管理员可调整账号角色，运营人员仅可查看角色。
+21. 支持节目下架、超时订单取消扫描和支付事件补偿操作。
+22. 管理控制台使用响应式侧边导航，移动端自动切换为横向功能栏和可滚动数据表格。
 
 ## 后端接口
 
@@ -417,6 +643,73 @@ GET /api/pay/events/{eventKey}
 Authorization: Bearer <token>
 ```
 
+### 管理接口
+
+统一前缀：
+
+```text
+/api/admin
+```
+
+管理概览：
+
+```http
+GET /api/admin/dashboard
+Authorization: Bearer <operator-or-admin-token>
+```
+
+用户管理列表：
+
+```http
+GET /api/admin/users?keyword=188&role=USER&pageNumber=1&pageSize=20
+Authorization: Bearer <operator-or-admin-token>
+```
+
+节目管理列表：
+
+```http
+GET /api/admin/programs?keyword=演唱会&programStatus=1&pageNumber=1&pageSize=20
+Authorization: Bearer <operator-or-admin-token>
+```
+
+订单管理列表：
+
+```http
+GET /api/admin/orders?userId=1&programId=10&orderStatus=1&pageNumber=1&pageSize=20
+Authorization: Bearer <operator-or-admin-token>
+```
+
+管理员调整用户角色：
+
+```http
+PUT /api/admin/users/{userId}/role
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+
+{"role":"OPERATOR"}
+```
+
+下架节目：
+
+```http
+POST /api/admin/programs/{programId}/offline
+Authorization: Bearer <operator-or-admin-token>
+```
+
+触发超时订单取消：
+
+```http
+POST /api/admin/orders/timeout-cancel
+Authorization: Bearer <operator-or-admin-token>
+```
+
+触发支付事件补偿：
+
+```http
+POST /api/admin/pay/events/compensate
+Authorization: Bearer <operator-or-admin-token>
+```
+
 ## 数据库表
 
 ### 用户库表
@@ -442,6 +735,9 @@ damai-user-service/src/main/resources/schema.sql
 ```text
 damai-program-service/src/main/resources/schema.sql
 ```
+
+节目服务默认配置 `DAMAI_PROGRAM_SQL_INIT_MODE=never`，启动时不会自动执行该文件。
+首次运行或删除表后，需要先手动执行建表脚本；测试环境仍会使用内存 H2 自动初始化这些表。
 
 包含：
 
@@ -502,6 +798,9 @@ damai-pay-service/src/main/resources/schema.sql
 16. JUnit + MockMvc 接口测试
 17. Spring Boot + MyBatis 事务集成测试与并发测试
 18. SLF4J 日志
+19. Spring Boot Actuator
+20. Micrometer Prometheus Registry
+21. Prometheus 2.53
 
 ### 前端
 
@@ -515,10 +814,11 @@ damai-pay-service/src/main/resources/schema.sql
 启动依赖服务：
 
 ```powershell
-docker compose up -d mysql redis nacos
+docker compose up -d --wait
 ```
 
-如果不用 `docker compose`，也可以按本地实际情况分别启动 MySQL、Redis、Nacos、Kafka、Elasticsearch。
+Compose 会启动 MySQL、Redis、Nacos、Elasticsearch、Zookeeper、Kafka 和 Prometheus。Java 服务从 IDEA 启动时继续使用
+`localhost`；服务容器化后使用 Compose 服务名，例如 `mysql`、`redis`、`nacos`、`elasticsearch`、`kafka:29092`。
 
 分别启动后端服务：
 
@@ -527,6 +827,7 @@ mvn -s maven-settings.xml -pl damai-user-service spring-boot:run
 mvn -s maven-settings.xml -pl damai-program-service spring-boot:run
 mvn -s maven-settings.xml -pl damai-order-service spring-boot:run
 mvn -s maven-settings.xml -pl damai-pay-service spring-boot:run
+mvn -s maven-settings.xml -pl damai-admin-service spring-boot:run
 mvn -s maven-settings.xml -pl damai-gateway-service spring-boot:run
 ```
 
@@ -581,13 +882,15 @@ npm run build
 18. 最后一张票被并发预占时的原子扣减与防超卖。
 19. 支付确认和用户取消并发竞争时的订单状态机单一终态。
 20. 网关使用用户服务身份覆盖客户端伪造的用户 ID 和角色请求头。
+21. 网关为请求生成 traceId，并保持合法的调用方 traceId 不变。
+22. 管理概览、用户/节目/订单筛选、管理角色边界和角色调整委托。
 
 ## 后续可扩展方向
 
 1. 接入真实支付宝页面支付、主动查单、退款申请和退款回调。
 2. 将超时订单取消从定时扫描进一步演进为 Redis 延迟队列、Kafka 延迟主题或时间轮。
-3. 完善后台管理端，支持节目审核、运营配置和人工补偿处理。
+3. 扩展管理端节目审核、运营配置和补偿事件明细处理能力。
 4. 增加更细粒度的 RBAC 权限控制。
 5. 增加库存流水表和对账任务，便于排查库存异常。
-6. 增加链路追踪、指标监控和告警，例如 Micrometer、Prometheus、Grafana。
+6. 在现有 Prometheus 指标基础上增加 Grafana 仪表盘、Alertmanager 告警和集中式日志检索。
 7. 为真实 Kafka broker、ES、Redis 增加 Testcontainers 级基础设施集成测试。

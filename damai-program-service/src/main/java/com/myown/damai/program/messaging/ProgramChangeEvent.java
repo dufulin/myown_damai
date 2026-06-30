@@ -1,5 +1,6 @@
 package com.myown.damai.program.messaging;
 
+import com.myown.damai.common.observability.TraceContext;
 import java.time.Instant;
 
 /**
@@ -10,7 +11,8 @@ public record ProgramChangeEvent(
         Long programId,
         ProgramChangeType changeType,
         String reason,
-        Instant occurredAt
+        Instant occurredAt,
+        String traceId
 ) {
 
     /**
@@ -19,6 +21,13 @@ public record ProgramChangeEvent(
     public static ProgramChangeEvent of(Long programId, ProgramChangeType changeType, String reason) {
         Instant now = Instant.now();
         String messageKey = "program-change:" + changeType.name().toLowerCase() + ":" + programId + ":" + now.toEpochMilli();
-        return new ProgramChangeEvent(messageKey, programId, changeType, reason, now);
+        return new ProgramChangeEvent(
+                messageKey,
+                programId,
+                changeType,
+                reason,
+                now,
+                TraceContext.currentOrCreateTraceId()
+        );
     }
 }

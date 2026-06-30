@@ -91,7 +91,7 @@ public class GatewayAdvancedRateLimitFilter implements GlobalFilter, Ordered {
      */
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE + 3;
+        return Ordered.HIGHEST_PRECEDENCE + 4;
     }
 
     /**
@@ -126,6 +126,9 @@ public class GatewayAdvancedRateLimitFilter implements GlobalFilter, Ordered {
                 .flatMap(buffer -> {
                     byte[] body = readAndRelease(buffer);
                     Long programId = resolveProgramId(body);
+                    if (programId != null) {
+                        exchange.getAttributes().put(GatewayTraceFilter.PROGRAM_ID_ATTRIBUTE, programId);
+                    }
                     ServerWebExchange cachedExchange = decorateRequestBody(exchange, body);
                     return applyRules(
                             cachedExchange,

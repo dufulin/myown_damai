@@ -1,0 +1,21 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        damai.order.creation.duration: true
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:--} userId=%X{userId:--} orderNumber=%X{orderNumber:--} programId=%X{programId:--}]"

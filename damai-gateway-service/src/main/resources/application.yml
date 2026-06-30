@@ -2,6 +2,8 @@ server:
   port: 8080
 
 spring:
+  config:
+    import: optional:classpath:damai-observability.yml
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
@@ -12,7 +14,7 @@ spring:
         enabled: false
       host: ${DAMAI_REDIS_HOST:localhost}
       port: ${DAMAI_REDIS_PORT:6379}
-      password: ${DAMAI_REDIS_PASSWORD:}
+      password: ${DAMAI_REDIS_PASSWORD:123}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: 2s
   cloud:
@@ -53,6 +55,8 @@ spring:
               - OPTIONS
             allowedHeaders:
               - "*"
+            exposedHeaders:
+              - X-Trace-Id
             allowCredentials: true
       routes:
         - id: damai-user-service
@@ -71,6 +75,10 @@ spring:
           uri: lb://damai-pay-service
           predicates:
             - Path=/api/pay/**
+        - id: damai-admin-service
+          uri: lb://damai-admin-service
+          predicates:
+            - Path=/api/admin/**
 
 damai:
   gateway:

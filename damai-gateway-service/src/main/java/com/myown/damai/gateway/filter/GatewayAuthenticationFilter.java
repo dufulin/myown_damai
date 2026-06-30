@@ -3,6 +3,7 @@ package com.myown.damai.gateway.filter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myown.damai.common.auth.UserRole;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
@@ -72,7 +73,7 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
      */
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE + 1;
+        return Ordered.HIGHEST_PRECEDENCE + 2;
     }
 
     /**
@@ -102,6 +103,12 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
         Mono<Void> authCall = webClient.get()
                 .uri(userServiceUrl + "/api/users/me")
                 .header(HttpHeaders.AUTHORIZATION, authorization)
+                .header(
+                        TraceContext.TRACE_ID_HEADER,
+                        TraceContext.resolveOrCreateTraceId(
+                                exchange.getRequest().getHeaders().getFirst(TraceContext.TRACE_ID_HEADER)
+                        )
+                )
                 .exchangeToMono(response -> handleAuthResponse(exchange, chain, response))
                 .timeout(userServiceTimeout);
         if (userServiceRetryCount > 0) {
@@ -163,6 +170,7 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
             String body
     ) {
         AuthenticatedIdentity identity = resolveIdentity(body);
+        exchange.getAttributes().put(GatewayTraceFilter.USER_ID_ATTRIBUTE, identity.userId());
         LOGGER.info(
                 "gateway auth passed, method={}, path={}, userId={}, role={}",
                 exchange.getRequest().getMethod(),

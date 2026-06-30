@@ -12,7 +12,7 @@ import java.util.Optional;
 public interface ProgramSearchGateway {
 
     /**
-     * Creates the program detail index when it does not exist.
+     * Ensures the program detail index exists and is ready for synchronization.
      */
     boolean createProgramDetailIndexIfAbsent();
 

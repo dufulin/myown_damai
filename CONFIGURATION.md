@@ -39,11 +39,13 @@ SPRING_PROFILES_ACTIVE=prod
 | `DAMAI_PROGRAM_DB_URL` | 继承 `DAMAI_DB_URL` | 节目服务数据库 URL |
 | `DAMAI_ORDER_DB_URL` | 继承 `DAMAI_DB_URL` | 订单服务数据库 URL |
 | `DAMAI_PAY_DB_URL` | 继承 `DAMAI_DB_URL` | 支付服务数据库 URL |
+| `DAMAI_ADMIN_DB_URL` | 继承 `DAMAI_DB_URL` | 管理服务只读聚合数据库 URL |
 | `DAMAI_DB_USERNAME` | `root` | 数据库用户名 |
 | `DAMAI_DB_PASSWORD` | `root` | 数据库密码 |
+| `DAMAI_PROGRAM_SQL_INIT_MODE` | `never` | 节目核心表初始化模式；默认禁止服务启动时自动建表 |
 | `DAMAI_REDIS_HOST` | `localhost` | Redis 主机 |
 | `DAMAI_REDIS_PORT` | `6379` | Redis 端口 |
-| `DAMAI_REDIS_PASSWORD` | 空 | Redis 密码，若本地 Redis 使用 `requirepass=123`，设置为 `123` |
+| `DAMAI_REDIS_PASSWORD` | `123` | Redis 密码，与 Docker Compose 默认配置一致 |
 | `DAMAI_REDIS_DATABASE` | `0` | Redis database |
 | `DAMAI_GATEWAY_RATE_GLOBAL_IP_MAX_REQUESTS` | `120` | 网关单 IP 每个全局窗口的最大请求数 |
 | `DAMAI_GATEWAY_RATE_GLOBAL_IP_WINDOW_SECONDS` | `60` | 网关全局 IP 限流窗口秒数 |
@@ -87,6 +89,11 @@ SPRING_PROFILES_ACTIVE=prod
 | `DAMAI_USER_CONNECT_TIMEOUT_MILLIS` | `1000` | 订单服务调用用户服务的连接超时 |
 | `DAMAI_USER_READ_TIMEOUT_MILLIS` | `2500` | 订单服务调用用户服务的读取超时 |
 | `DAMAI_USER_RETRY_COUNT` | `1` | 订单服务调用用户服务的最大重试次数 |
+| `DAMAI_USER_SERVICE_URL` | `http://damai-user-service` | 管理服务调用用户服务的地址 |
+| `DAMAI_PROGRAM_SERVICE_URL` | `http://damai-program-service` | 管理服务调用节目服务的地址 |
+| `DAMAI_ORDER_SERVICE_URL` | `http://damai-order-service` | 管理服务调用订单服务的地址 |
+| `DAMAI_PAY_SERVICE_URL` | `http://damai-pay-service` | 管理服务调用支付服务的地址 |
+| `DAMAI_ADMIN_CLIENT_TIMEOUT_MILLIS` | `3500` | 管理服务执行运营动作的总超时 |
 | `DAMAI_PAY_EVENT_COMPENSATION_ENABLED` | `true` | 是否启用支付事件补偿扫描 |
 | `DAMAI_PAY_EVENT_SCAN_DELAY_MILLIS` | `30000` | 支付事件补偿扫描间隔 |
 | `DAMAI_PAY_EVENT_MAX_RETRY_COUNT` | `5` | 支付事件通知订单服务最大重试次数 |
@@ -94,27 +101,120 @@ SPRING_PROFILES_ACTIVE=prod
 | `DAMAI_PAY_EVENT_RETRY_MAX_DELAY_SECONDS` | `300` | 支付事件最大重试延迟 |
 | `DAMAI_PAY_EVENT_PROCESSING_TIMEOUT_SECONDS` | `120` | 支付事件处理中卡住后的恢复时间 |
 
-## 本地 Docker 建议
+## Docker Compose 一键启动
 
-本地服务在 IDEA 中启动时，基础设施容器统一映射到宿主机端口即可：
+根目录的 `docker-compose.yml` 统一启动 MySQL、Redis、Nacos、Elasticsearch、Zookeeper、Kafka 和 Prometheus。
+默认配置已经和 Java 服务的 `dev` profile 对齐，不需要填写局域网 IP：
 
-```bash
-docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root mysql:5.7
-docker run -d --name redis -p 6379:6379 redis:6.0.8
-docker run -d --name nacos-server -p 8848:8848 -p 9848:9848 -e MODE=standalone nacos/nacos-server:v2.2.3
+```powershell
+docker compose up -d --wait
+docker compose ps
 ```
 
-如果 Redis 使用密码启动：
+需要覆盖默认密码、端口或 JVM 内存时，可以从示例创建本地 `.env`：
 
-```bash
-set DAMAI_REDIS_PASSWORD=123
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --wait
 ```
 
-Kafka 本地建议使用成对的 Zookeeper/Kafka 容器，并让 Java 服务连接：
+固定访问地址：
 
-```bash
-set DAMAI_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+| 组件 | IDEA/宿主机地址 | Compose 网络地址 |
+| --- | --- | --- |
+| MySQL | `localhost:3306` | `mysql:3306` |
+| Redis | `localhost:6379`，密码 `123` | `redis:6379` |
+| Nacos | `localhost:8848` | `nacos:8848` 或 `nacos-server:8848` |
+| Elasticsearch | `http://localhost:9200` | `http://elasticsearch:9200` 或 `http://es:9200` |
+| Zookeeper | `localhost:2181` | `zookeeper:2181` |
+| Kafka | `localhost:9092` | `kafka:29092` |
+| Prometheus | `http://localhost:9090` | `prometheus:9090` |
+
+停止容器但保留数据：
+
+```powershell
+docker compose down
 ```
+
+Kafka 和 Zookeeper 使用同一个 Compose 项目的命名卷。需要重建 Kafka 集群元数据时，必须成对清理；
+以下命令也会删除 MySQL、Redis、Nacos 和 ES 的本地数据：
+
+```powershell
+docker compose down -v
+docker compose up -d --wait
+```
+
+如果之前手工启动的容器仍占用 `3306`、`6379`、`8848`、`9200`、`2181`、`9092` 或 `9090`，
+应先停止旧容器，再启动本项目 Compose。
+
+### Redis 密码排查
+
+官方 `redis` 镜像不会根据 `-e requirepass=123` 自动启用密码。环境变量只会被保存到容器中，
+Redis 进程仍然以无密码模式启动，随后会导致 Redisson 报
+`ERR AUTH <password> called without any password configured`。
+
+推荐直接使用本项目 Compose。需要单独创建 Redis 容器时，应把密码作为 `redis-server` 参数传入：
+
+```powershell
+docker run -d --name redis -p 6379:6379 redis:6.0.8 redis-server --appendonly yes --requirepass 123
+```
+
+检查密码是否生效：
+
+```powershell
+docker exec redis redis-cli -a 123 ping
+```
+
+返回 `PONG` 表示配置正确。`application.yml`、`.env` 与容器的密码必须保持一致；默认均为 `123`。
+`CONFIG SET requirepass 123` 只修改当前 Redis 进程，旧容器重启后可能失效，不能替代正确的启动命令。
+
+## 节目表手动初始化
+
+节目服务默认不会自动创建以下核心表：
+
+- `d_program_category`
+- `d_program_group`
+- `d_program`
+- `d_program_show_time`
+- `d_ticket_category`
+- `d_seat`
+
+首次启动节目服务前，在项目根目录手动执行：
+
+```powershell
+Get-Content -Raw damai-program-service/src/main/resources/schema.sql |
+  docker exec -i mysql mysql -uroot -proot myown_damai
+```
+
+本地通过 MySQL 客户端执行时，也可以直接打开
+`damai-program-service/src/main/resources/schema.sql` 并选择 `myown_damai` 数据库运行。
+应用运行环境保持 `DAMAI_PROGRAM_SQL_INIT_MODE=never`；只有确实需要临时恢复自动初始化时才将其设置为 `always`。
+
+## 可观测性
+
+所有后端服务都暴露以下 Actuator 端点：
+
+| 端点 | 用途 |
+| --- | --- |
+| `/actuator/health` | 服务健康状态 |
+| `/actuator/prometheus` | Prometheus 指标抓取 |
+| `/actuator/metrics` | 本地查看可用指标名称 |
+
+Prometheus 使用 [deploy/prometheus/prometheus.yml](deploy/prometheus/prometheus.yml) 抓取宿主机 `8080` 到 `8085`
+端口，并加载 [deploy/prometheus/damai-rules.yml](deploy/prometheus/damai-rules.yml) 中的聚合规则。启动 Java 服务和
+Compose 后，可在 `http://localhost:9090/targets` 检查抓取状态。
+
+核心记录指标：
+
+| 指标 | 说明 |
+| --- | --- |
+| `http_server_requests_seconds_count` | HTTP QPS 和错误率来源 |
+| `kafka_consumer_records_lag_max` | Kafka 消费者最大积压 |
+| `damai_cache_requests_total{result="hit\|miss\|error"}` | Redis 缓存读取结果与命中率 |
+| `damai_order_creation_duration_seconds` | 同步提交、异步提交和异步消费建单耗时 |
+
+每个 API 响应都会携带 `X-Trace-Id`。网关会接受合法的调用方 traceId 或生成新值，并向下游 HTTP 与 Kafka
+消息传播。日志格式固定输出 `traceId`、`userId`、`orderNumber`、`programId`，未知字段显示为 `-`。
 
 ## 首个管理员初始化
 
@@ -122,5 +222,5 @@ set DAMAI_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 `REPLACE_WITH_ADMIN_MOBILE` 替换为首个管理员手机号。之后管理员可以调用
 `PUT /api/users/{userId}/role` 管理 `USER`、`OPERATOR`、`ADMIN` 角色；`SYSTEM` 不允许分配给用户账号。
 
-生产部署只应对外暴露网关 `8080` 端口。用户、节目、订单、支付服务端口应放在受限内网，
+生产部署只应对外暴露网关 `8080` 端口。用户、节目、订单、支付、管理服务端口应放在受限内网，
 避免外部请求绕过网关伪造 `X-Damai-User-Id`、`X-Damai-User-Role` 等服务间可信请求头。

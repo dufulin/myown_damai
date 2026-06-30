@@ -52,13 +52,20 @@ public class GatewayRolePolicy {
      * Checks endpoints that only administrators may invoke.
      */
     private boolean isAdminEndpoint(HttpMethod method, String path) {
-        return HttpMethod.PUT.equals(method) && path.matches("/api/users/\\d+/role");
+        return HttpMethod.PUT.equals(method)
+                && (
+                        path.matches("/api/users/\\d+/role")
+                                || path.matches("/api/admin/users/\\d+/role")
+                );
     }
 
     /**
      * Checks endpoints available to operators and administrators.
      */
     private boolean isOperationsEndpoint(HttpMethod method, String path) {
+        if (path.startsWith("/api/admin/")) {
+            return HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method);
+        }
         if (path.startsWith("/api/pay/events/")) {
             return HttpMethod.GET.equals(method) || HttpMethod.POST.equals(method);
         }

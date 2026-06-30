@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myown.damai.common.cache.DamaiCacheKey;
 import com.myown.damai.common.exception.BusinessException;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.order.client.ProgramInventoryClient;
 import com.myown.damai.order.client.ProgramInventoryItemRequest;
 import com.myown.damai.order.client.ProgramInventoryRequest;
@@ -40,6 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.redisson.api.RBucket;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -84,6 +87,7 @@ public class OrderService {
     private final ObjectMapper objectMapper;
     private final ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider;
     private final ObjectProvider<RedissonClient> redissonClientProvider;
+    private final MeterRegistry meterRegistry;
     private final Map<String, Long> localPendingOrders = new ConcurrentHashMap<>();
     private final AtomicBoolean localTimeoutScanRunning = new AtomicBoolean(false);
     private final Duration orderTimeout;
@@ -109,6 +113,7 @@ public class OrderService {
             ObjectMapper objectMapper,
             ObjectProvider<OrderAsyncProducer> orderAsyncProducerProvider,
             ObjectProvider<RedissonClient> redissonClientProvider,
+            MeterRegistry meterRegistry,
             @Value("${damai.order.timeout-minutes:15}") long timeoutMinutes,
             @Value("${damai.order.timeout-scan-lock.wait-seconds:1}") long timeoutScanLockWaitSeconds,
             @Value("${damai.order.timeout-scan-lock.lease-seconds:120}") long timeoutScanLockLeaseSeconds,
@@ -128,6 +133,7 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.orderAsyncProducerProvider = orderAsyncProducerProvider;
         this.redissonClientProvider = redissonClientProvider;
+        this.meterRegistry = meterRegistry;
         this.orderTimeout = Duration.ofMinutes(timeoutMinutes);
         this.timeoutScanLockWaitTime = Duration.ofSeconds(timeoutScanLockWaitSeconds);
         this.timeoutScanLockLeaseTime = Duration.ofSeconds(timeoutScanLockLeaseSeconds);
@@ -142,43 +148,67 @@ public class OrderService {
      * Creates one unpaid order with idempotency and a program-level distributed lock.
      */
     public OrderResponse createOrder(OrderCreateRequest request) {
-        validateAuthenticatedUserId(request.userId());
-        Optional<Order> existingOrder = findExistingOrder(request.userId(), request.programId());
-        if (existingOrder.isPresent()) {
-            LOGGER.info(
-                    "order create idempotent hit before lock, userId={}, programId={}, orderNumber={}",
-                    request.userId(),
-                    request.programId(),
-                    existingOrder.get().orderNumber
-            );
-            return buildOrderResponse(existingOrder.get());
-        }
+        TraceContext.putUserId(request.userId());
+        TraceContext.putProgramId(request.programId());
+        Timer.Sample sample = Timer.start(meterRegistry);
+        String outcome = "success";
+        try {
+            validateAuthenticatedUserId(request.userId());
+            Optional<Order> existingOrder = findExistingOrder(request.userId(), request.programId());
+            if (existingOrder.isPresent()) {
+                TraceContext.putOrderNumber(existingOrder.get().orderNumber);
+                LOGGER.info(
+                        "order create idempotent hit before lock, userId={}, programId={}, orderNumber={}",
+                        request.userId(),
+                        request.programId(),
+                        existingOrder.get().orderNumber
+                );
+                return buildOrderResponse(existingOrder.get());
+            }
 
-        if (asyncEnabled) {
-            return submitOrderAsync(request);
-        }
+            if (asyncEnabled) {
+                return submitOrderAsync(request);
+            }
 
-        return orderLockExecutor.executeWithProgramLock(request.programId(), () -> {
-            // Start the database transaction only after the program lock is held, so the lock-protected idempotency check sees latest committed data.
-            OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(request));
-            return Objects.requireNonNull(response, "created order response must not be null");
-        });
+            return orderLockExecutor.executeWithProgramLock(request.programId(), () -> {
+                // Start the database transaction only after the program lock is held, so the lock-protected idempotency check sees latest committed data.
+                OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(request));
+                return Objects.requireNonNull(response, "created order response must not be null");
+            });
+        } catch (RuntimeException exception) {
+            outcome = "failure";
+            throw exception;
+        } finally {
+            recordOrderCreationDuration(sample, asyncEnabled ? "async_submit" : "sync", outcome);
+        }
     }
 
     /**
      * Creates one order from a Kafka asynchronous order creation message.
      */
     public OrderResponse createOrderFromAsyncMessage(OrderAsyncCreateMessage message) {
-        validateAuthenticatedUserId(message.request().userId());
-        return orderLockExecutor.executeWithProgramLock(message.request().programId(), () -> {
-            OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(
-                    message.request(),
-                    message.orderNumber(),
-                    message.programSnapshot()
-            ));
-            removePendingOrder(message.request().userId(), message.request().programId(), message.orderNumber());
-            return Objects.requireNonNull(response, "created async order response must not be null");
-        });
+        TraceContext.putUserId(message.request().userId());
+        TraceContext.putProgramId(message.request().programId());
+        TraceContext.putOrderNumber(message.orderNumber());
+        Timer.Sample sample = Timer.start(meterRegistry);
+        String outcome = "success";
+        try {
+            validateAuthenticatedUserId(message.request().userId());
+            return orderLockExecutor.executeWithProgramLock(message.request().programId(), () -> {
+                OrderResponse response = transactionTemplate.execute(status -> createOrderWithinLock(
+                        message.request(),
+                        message.orderNumber(),
+                        message.programSnapshot()
+                ));
+                removePendingOrder(message.request().userId(), message.request().programId(), message.orderNumber());
+                return Objects.requireNonNull(response, "created async order response must not be null");
+            });
+        } catch (RuntimeException exception) {
+            outcome = "failure";
+            throw exception;
+        } finally {
+            recordOrderCreationDuration(sample, "async_consume", outcome);
+        }
     }
 
     /**
@@ -232,8 +262,10 @@ public class OrderService {
                 messageKey,
                 orderNumber,
                 request,
-                draft.programSnapshot()
+                draft.programSnapshot(),
+                TraceContext.currentOrCreateTraceId()
         );
+        TraceContext.putOrderNumber(orderNumber);
         OrderAsyncMessage asyncMessage = buildAsyncMessage(message);
         try {
             orderAsyncMessageDao.saveMessage(asyncMessage);
@@ -910,6 +942,17 @@ public class OrderService {
     private Long nextOrderNumber() {
         int sequence = ORDER_SEQUENCE.updateAndGet(value -> value >= 999 ? 0 : value + 1);
         return Instant.now().toEpochMilli() * 1000 + sequence;
+    }
+
+    /**
+     * Records one order creation stage with mode and outcome tags.
+     */
+    private void recordOrderCreationDuration(Timer.Sample sample, String mode, String outcome) {
+        sample.stop(Timer.builder("damai.order.creation.duration")
+                .description("Order creation duration by execution stage")
+                .tag("mode", mode)
+                .tag("outcome", outcome)
+                .register(meterRegistry));
     }
 
     /**

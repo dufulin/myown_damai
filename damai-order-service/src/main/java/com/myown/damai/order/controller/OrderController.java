@@ -2,6 +2,7 @@ package com.myown.damai.order.controller;
 
 import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.dto.ApiResponse;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
 import com.myown.damai.order.dto.OrderAsyncMessageResponse;
 import com.myown.damai.order.dto.OrderCancelRequest;
@@ -55,8 +56,11 @@ public class OrderController {
             @Valid @RequestBody OrderCreateRequest request
     ) {
         Long authenticatedUserId = AuthenticatedUserHeader.resolveRequired(userIdHeader);
+        TraceContext.putUserId(authenticatedUserId);
+        TraceContext.putProgramId(request.programId());
         LOGGER.info("order create request received, userId={}, programId={}", authenticatedUserId, request.programId());
         OrderResponse response = orderService.createOrder(request.withUserId(authenticatedUserId));
+        TraceContext.putOrderNumber(response.orderNumber());
         LOGGER.info("order create request succeeded, orderNumber={}", response.orderNumber());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }

@@ -2,6 +2,8 @@ server:
   port: 8081
 
 spring:
+  config:
+    import: optional:classpath:damai-observability.yml
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
@@ -17,7 +19,7 @@ spring:
         enabled: false
       host: ${DAMAI_REDIS_HOST:localhost}
       port: ${DAMAI_REDIS_PORT:6379}
-      password: ${DAMAI_REDIS_PASSWORD:}
+      password: ${DAMAI_REDIS_PASSWORD:123}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: 2s
   cloud:

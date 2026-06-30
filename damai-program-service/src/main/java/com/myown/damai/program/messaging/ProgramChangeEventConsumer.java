@@ -1,6 +1,7 @@
 package com.myown.damai.program.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.myown.damai.common.observability.TraceContext;
 import com.myown.damai.program.service.ProgramService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +44,13 @@ public class ProgramChangeEventConsumer {
             @Header(name = KafkaHeaders.RECEIVED_KEY, required = false) String kafkaKey
     ) throws Exception {
         ProgramChangeEvent event = objectMapper.readValue(payload, ProgramChangeEvent.class);
-        LOGGER.info("program change event received, topic={}, kafkaKey={}, programId={}, changeType={}, reason={}", topic, kafkaKey, event.programId(), event.changeType(), event.reason());
-        if (ProgramChangeType.DELETE.equals(event.changeType())) {
-            programService.deleteProgramDetailFromSearchIndex(event.programId());
-            return;
+        try (TraceContext.Scope ignored = TraceContext.open(event.traceId(), null, null, event.programId())) {
+            LOGGER.info("program change event received, topic={}, kafkaKey={}, programId={}, changeType={}, reason={}", topic, kafkaKey, event.programId(), event.changeType(), event.reason());
+            if (ProgramChangeType.DELETE.equals(event.changeType())) {
+                programService.deleteProgramDetailFromSearchIndex(event.programId());
+                return;
+            }
+            programService.syncProgramDetailToSearchIndex(event.programId());
         }
-        programService.syncProgramDetailToSearchIndex(event.programId());
     }
 }

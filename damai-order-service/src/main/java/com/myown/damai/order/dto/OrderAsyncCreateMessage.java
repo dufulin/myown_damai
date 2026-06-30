@@ -9,6 +9,7 @@ public record OrderAsyncCreateMessage(
         String messageKey,
         Long orderNumber,
         OrderCreateRequest request,
-        ProgramOrderSnapshot programSnapshot
+        ProgramOrderSnapshot programSnapshot,
+        String traceId
 ) {
 }

@@ -4,6 +4,7 @@ import com.myown.damai.common.auth.UserRole;
 import com.myown.damai.common.dto.ApiResponse;
 import com.myown.damai.common.exception.BusinessException;
 import com.myown.damai.common.web.AuthenticatedUserHeader;
+import com.myown.damai.common.observability.TraceContext;
 import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
@@ -50,6 +51,10 @@ public class TicketUserClient {
         this.restClient = restClientBuilder
                 .requestFactory(requestFactory)
                 .baseUrl(userServiceBaseUrl)
+                .requestInterceptor((request, body, execution) -> {
+                    TraceContext.writeTo(request.getHeaders());
+                    return execution.execute(request, body);
+                })
                 .build();
         this.circuitBreaker = circuitBreakerFactory.create("orderTicketUserClient");
         this.maxRetryCount = maxRetryCount;
